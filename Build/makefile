@@ -12,8 +12,8 @@
 #   intel_linux[_db|_dv]      impi_intel_linux[_db|_dv]
 #                             ompi_intel_linux[_db|_dv]
 #
-# Intel oneAPI: override classic ifort wrappers if needed, e.g.:
-#   make -j4 -f ../makefile FCOMPL=mpiifx CCOMPL=icx impi_intel_linux
+# Intel oneAPI defaults (classic ifort/icc still work via make_fds.sh fallback)
+# Override explicitly if needed: make FCOMPL=mpiifort CCOMPL=icc ...
 
 VPATH = ../SourceFiles
 
@@ -169,8 +169,8 @@ ompi_gnu_linux_dv : setup $(obj_mpi)
 
 intel_linux : FFLAGS = -O2 -ipo -no-wrap-margin
 intel_linux : CFLAGS = -O -Dpp_noappend
-intel_linux : FCOMPL = ifort
-intel_linux : CCOMPL = icc
+intel_linux : FCOMPL = ifx
+intel_linux : CCOMPL = icx
 intel_linux : LFLAGS = -static-intel
 intel_linux : obj = wfds_intel_linux
 intel_linux : setup $(obj_serial)
@@ -178,8 +178,8 @@ intel_linux : setup $(obj_serial)
 
 intel_linux_db : FFLAGS = -check all -warn unused -O0 -auto -WB -traceback -g -fpe0 -no-wrap-margin
 intel_linux_db : CFLAGS = -g -Dpp_noappend
-intel_linux_db : FCOMPL = ifort
-intel_linux_db : CCOMPL = icc
+intel_linux_db : FCOMPL = ifx
+intel_linux_db : CCOMPL = icx
 intel_linux_db : LFLAGS = -static-intel
 intel_linux_db : obj = wfds_intel_linux_db
 intel_linux_db : setup $(obj_serial)
@@ -187,8 +187,8 @@ intel_linux_db : setup $(obj_serial)
 
 intel_linux_dv : FFLAGS = -warn unused -O1 -g -traceback -no-wrap-margin
 intel_linux_dv : CFLAGS = -O1 -g -Dpp_noappend
-intel_linux_dv : FCOMPL = ifort
-intel_linux_dv : CCOMPL = icc
+intel_linux_dv : FCOMPL = ifx
+intel_linux_dv : CCOMPL = icx
 intel_linux_dv : LFLAGS = -static-intel
 intel_linux_dv : obj = wfds_intel_linux_dv
 intel_linux_dv : setup $(obj_serial)
@@ -198,8 +198,8 @@ intel_linux_dv : setup $(obj_serial)
 
 impi_intel_linux : FFLAGS = -O2 -ipo -no-wrap-margin
 impi_intel_linux : CFLAGS = -O -Dpp_noappend
-impi_intel_linux : FCOMPL = mpiifort
-impi_intel_linux : CCOMPL = icc
+impi_intel_linux : FCOMPL = mpiifx
+impi_intel_linux : CCOMPL = icx
 impi_intel_linux : LFLAGS = -static-intel
 impi_intel_linux : obj = wfds_impi_intel_linux
 impi_intel_linux : setup $(obj_mpi)
@@ -207,8 +207,8 @@ impi_intel_linux : setup $(obj_mpi)
 
 impi_intel_linux_db : FFLAGS = -check all -warn unused -O0 -auto -WB -traceback -g -fpe0 -no-wrap-margin
 impi_intel_linux_db : CFLAGS = -g -Dpp_noappend
-impi_intel_linux_db : FCOMPL = mpiifort
-impi_intel_linux_db : CCOMPL = icc
+impi_intel_linux_db : FCOMPL = mpiifx
+impi_intel_linux_db : CCOMPL = icx
 impi_intel_linux_db : LFLAGS = -static-intel
 impi_intel_linux_db : obj = wfds_impi_intel_linux_db
 impi_intel_linux_db : setup $(obj_mpi)
@@ -216,8 +216,8 @@ impi_intel_linux_db : setup $(obj_mpi)
 
 impi_intel_linux_dv : FFLAGS = -warn unused -O1 -g -traceback -no-wrap-margin
 impi_intel_linux_dv : CFLAGS = -O1 -g -Dpp_noappend
-impi_intel_linux_dv : FCOMPL = mpiifort
-impi_intel_linux_dv : CCOMPL = icc
+impi_intel_linux_dv : FCOMPL = mpiifx
+impi_intel_linux_dv : CCOMPL = icx
 impi_intel_linux_dv : LFLAGS = -static-intel
 impi_intel_linux_dv : obj = wfds_impi_intel_linux_dv
 impi_intel_linux_dv : setup $(obj_mpi)
