@@ -1,11 +1,14 @@
 # Makefile for WFDS (FDS6 r9977-based)
 #
-# Mac / GNU only. Build from a target directory, e.g.:
+# GNU / OpenMPI builds for macOS and Linux. Build from a target directory, e.g.:
 #
-#   cd Build/ompi_gnu_osx && ./make_fds.sh
-#   cd Build/gnu_osx_db   && ./make_fds.sh
+#   cd Build/ompi_gnu_osx   && ./make_fds.sh
+#   cd Build/ompi_gnu_linux && ./make_fds.sh
+#   cd Build/gnu_osx_db     && ./make_fds.sh
 #
-# Targets: gnu_osx[_db|_dv]  ompi_gnu_osx[_db|_dv]
+# Targets:
+#   gnu_osx[_db|_dv]       ompi_gnu_osx[_db|_dv]
+#   gnu_linux[_db|_dv]     ompi_gnu_linux[_db|_dv]
 
 VPATH = ../SourceFiles
 
@@ -69,6 +72,35 @@ gnu_osx_dv : obj = wfds_gnu_osx_dv
 gnu_osx_dv : setup $(obj_serial)
 	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_serial)
 
+# *** Serial GNU Linux ***
+
+gnu_linux : FFLAGS = -O3 $(GFORTRAN_BASE)
+gnu_linux : CFLAGS = -O3
+gnu_linux : FCOMPL = gfortran
+gnu_linux : CCOMPL = gcc
+gnu_linux : LFLAGS = -static-libgfortran -static-libquadmath
+gnu_linux : obj = wfds_gnu_linux
+gnu_linux : setup $(obj_serial)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_serial)
+
+gnu_linux_db : FFLAGS = -O0 -ggdb -Wall -Wsurprising -Wcharacter-truncation -fcheck=all -fbacktrace -ffpe-trap=invalid,zero,overflow $(GFORTRAN_BASE)
+gnu_linux_db : CFLAGS = -O0 -g
+gnu_linux_db : FCOMPL = gfortran
+gnu_linux_db : CCOMPL = gcc
+gnu_linux_db : LFLAGS = -static-libgfortran -static-libquadmath
+gnu_linux_db : obj = wfds_gnu_linux_db
+gnu_linux_db : setup $(obj_serial)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_serial)
+
+gnu_linux_dv : FFLAGS = -O1 -fbacktrace $(GFORTRAN_BASE)
+gnu_linux_dv : CFLAGS = -O1 -g
+gnu_linux_dv : FCOMPL = gfortran
+gnu_linux_dv : CCOMPL = gcc
+gnu_linux_dv : LFLAGS = -static-libgfortran -static-libquadmath
+gnu_linux_dv : obj = wfds_gnu_linux_dv
+gnu_linux_dv : setup $(obj_serial)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_serial)
+
 # *** OpenMPI GNU OSX ***
 
 ompi_gnu_osx : FFLAGS = -O3 $(GFORTRAN_BASE)
@@ -96,6 +128,35 @@ ompi_gnu_osx_dv : CCOMPL = mpicc
 ompi_gnu_osx_dv : LFLAGS = -static-libgfortran -static-libquadmath
 ompi_gnu_osx_dv : obj = wfds_ompi_gnu_osx_dv
 ompi_gnu_osx_dv : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+# *** OpenMPI GNU Linux ***
+
+ompi_gnu_linux : FFLAGS = -O3 $(GFORTRAN_BASE)
+ompi_gnu_linux : CFLAGS = -O3
+ompi_gnu_linux : FCOMPL = mpifort
+ompi_gnu_linux : CCOMPL = mpicc
+ompi_gnu_linux : LFLAGS = -static-libgfortran -static-libquadmath
+ompi_gnu_linux : obj = wfds_ompi_gnu_linux
+ompi_gnu_linux : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+ompi_gnu_linux_db : FFLAGS = -O0 -ggdb -Wall -Wsurprising -Wcharacter-truncation -fcheck=all -fbacktrace -ffpe-trap=invalid,zero,overflow $(GFORTRAN_BASE)
+ompi_gnu_linux_db : CFLAGS = -O0 -g
+ompi_gnu_linux_db : FCOMPL = mpifort
+ompi_gnu_linux_db : CCOMPL = mpicc
+ompi_gnu_linux_db : LFLAGS = -static-libgfortran -static-libquadmath
+ompi_gnu_linux_db : obj = wfds_ompi_gnu_linux_db
+ompi_gnu_linux_db : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+ompi_gnu_linux_dv : FFLAGS = -O1 -fbacktrace $(GFORTRAN_BASE)
+ompi_gnu_linux_dv : CFLAGS = -O1 -g
+ompi_gnu_linux_dv : FCOMPL = mpifort
+ompi_gnu_linux_dv : CCOMPL = mpicc
+ompi_gnu_linux_dv : LFLAGS = -static-libgfortran -static-libquadmath
+ompi_gnu_linux_dv : obj = wfds_ompi_gnu_linux_dv
+ompi_gnu_linux_dv : setup $(obj_mpi)
 	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
 
 # *** Object Dependencies ***
