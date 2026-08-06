@@ -1,14 +1,19 @@
 # Makefile for WFDS (FDS6 r9977-based)
 #
-# GNU / OpenMPI builds for macOS and Linux. Build from a target directory, e.g.:
+# GNU / Intel builds for macOS and Linux. Build from a target directory, e.g.:
 #
-#   cd Build/ompi_gnu_osx   && ./make_fds.sh
-#   cd Build/ompi_gnu_linux && ./make_fds.sh
-#   cd Build/gnu_osx_db     && ./make_fds.sh
+#   cd Build/ompi_gnu_osx      && ./make_fds.sh
+#   cd Build/ompi_gnu_linux    && ./make_fds.sh
+#   cd Build/impi_intel_linux  && ./make_fds.sh
 #
 # Targets:
-#   gnu_osx[_db|_dv]       ompi_gnu_osx[_db|_dv]
-#   gnu_linux[_db|_dv]     ompi_gnu_linux[_db|_dv]
+#   gnu_osx[_db|_dv]          ompi_gnu_osx[_db|_dv]
+#   gnu_linux[_db|_dv]        ompi_gnu_linux[_db|_dv]
+#   intel_linux[_db|_dv]      impi_intel_linux[_db|_dv]
+#                             ompi_intel_linux[_db|_dv]
+#
+# Intel oneAPI: override classic ifort wrappers if needed, e.g.:
+#   make -j4 -f ../makefile FCOMPL=mpiifx CCOMPL=icx impi_intel_linux
 
 VPATH = ../SourceFiles
 
@@ -157,6 +162,94 @@ ompi_gnu_linux_dv : CCOMPL = mpicc
 ompi_gnu_linux_dv : LFLAGS = -static-libgfortran -static-libquadmath
 ompi_gnu_linux_dv : obj = wfds_ompi_gnu_linux_dv
 ompi_gnu_linux_dv : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+# *** Serial Intel Linux ***
+# -Dpp_noappend: Intel Fortran does not append underscores (matches isob.c)
+
+intel_linux : FFLAGS = -O2 -ipo -no-wrap-margin
+intel_linux : CFLAGS = -O -Dpp_noappend
+intel_linux : FCOMPL = ifort
+intel_linux : CCOMPL = icc
+intel_linux : LFLAGS = -static-intel
+intel_linux : obj = wfds_intel_linux
+intel_linux : setup $(obj_serial)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_serial)
+
+intel_linux_db : FFLAGS = -check all -warn unused -O0 -auto -WB -traceback -g -fpe0 -no-wrap-margin
+intel_linux_db : CFLAGS = -g -Dpp_noappend
+intel_linux_db : FCOMPL = ifort
+intel_linux_db : CCOMPL = icc
+intel_linux_db : LFLAGS = -static-intel
+intel_linux_db : obj = wfds_intel_linux_db
+intel_linux_db : setup $(obj_serial)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_serial)
+
+intel_linux_dv : FFLAGS = -warn unused -O1 -g -traceback -no-wrap-margin
+intel_linux_dv : CFLAGS = -O1 -g -Dpp_noappend
+intel_linux_dv : FCOMPL = ifort
+intel_linux_dv : CCOMPL = icc
+intel_linux_dv : LFLAGS = -static-intel
+intel_linux_dv : obj = wfds_intel_linux_dv
+intel_linux_dv : setup $(obj_serial)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_serial)
+
+# *** Intel MPI + Intel Fortran Linux ***
+
+impi_intel_linux : FFLAGS = -O2 -ipo -no-wrap-margin
+impi_intel_linux : CFLAGS = -O -Dpp_noappend
+impi_intel_linux : FCOMPL = mpiifort
+impi_intel_linux : CCOMPL = icc
+impi_intel_linux : LFLAGS = -static-intel
+impi_intel_linux : obj = wfds_impi_intel_linux
+impi_intel_linux : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+impi_intel_linux_db : FFLAGS = -check all -warn unused -O0 -auto -WB -traceback -g -fpe0 -no-wrap-margin
+impi_intel_linux_db : CFLAGS = -g -Dpp_noappend
+impi_intel_linux_db : FCOMPL = mpiifort
+impi_intel_linux_db : CCOMPL = icc
+impi_intel_linux_db : LFLAGS = -static-intel
+impi_intel_linux_db : obj = wfds_impi_intel_linux_db
+impi_intel_linux_db : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+impi_intel_linux_dv : FFLAGS = -warn unused -O1 -g -traceback -no-wrap-margin
+impi_intel_linux_dv : CFLAGS = -O1 -g -Dpp_noappend
+impi_intel_linux_dv : FCOMPL = mpiifort
+impi_intel_linux_dv : CCOMPL = icc
+impi_intel_linux_dv : LFLAGS = -static-intel
+impi_intel_linux_dv : obj = wfds_impi_intel_linux_dv
+impi_intel_linux_dv : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+# *** OpenMPI + Intel Fortran Linux ***
+
+ompi_intel_linux : FFLAGS = -O2 -ipo -no-wrap-margin
+ompi_intel_linux : CFLAGS = -O -Dpp_noappend
+ompi_intel_linux : FCOMPL = mpifort
+ompi_intel_linux : CCOMPL = mpicc
+ompi_intel_linux : LFLAGS = -static-intel
+ompi_intel_linux : obj = wfds_ompi_intel_linux
+ompi_intel_linux : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+ompi_intel_linux_db : FFLAGS = -check all -warn unused -O0 -auto -WB -traceback -g -fpe0 -no-wrap-margin
+ompi_intel_linux_db : CFLAGS = -g -Dpp_noappend
+ompi_intel_linux_db : FCOMPL = mpifort
+ompi_intel_linux_db : CCOMPL = mpicc
+ompi_intel_linux_db : LFLAGS = -static-intel
+ompi_intel_linux_db : obj = wfds_ompi_intel_linux_db
+ompi_intel_linux_db : setup $(obj_mpi)
+	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
+
+ompi_intel_linux_dv : FFLAGS = -warn unused -O1 -g -traceback -no-wrap-margin
+ompi_intel_linux_dv : CFLAGS = -O1 -g -Dpp_noappend
+ompi_intel_linux_dv : FCOMPL = mpifort
+ompi_intel_linux_dv : CCOMPL = mpicc
+ompi_intel_linux_dv : LFLAGS = -static-intel
+ompi_intel_linux_dv : obj = wfds_ompi_intel_linux_dv
+ompi_intel_linux_dv : setup $(obj_mpi)
 	$(FCOMPL) $(FFLAGS) $(LFLAGS) -o $(obj) $(obj_mpi)
 
 # *** Object Dependencies ***
