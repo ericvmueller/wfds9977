@@ -4416,11 +4416,8 @@ DO WHILE (TIME_LS < T_FINAL)
 !RK Stage 1
  RK2_PREDICTOR_LS = .TRUE.
  CALL LEVEL_SET_ADVECT_FLUX(NM)
-!Clamp to [PHI_MIN_LS,PHI_MAX_LS]. The TVD flux limiter suppresses new extrema but does not
-!strictly guarantee boundedness here: the spread rate field varies in space (compressive at the
-!front), the 2D advection is dimension-by-dimension, and the spread rates are recomputed between
-!the two RK stages. Small over/undershoots beyond +-1 are therefore possible and are removed.
- PHI1_LS = MAX(PHI_MIN_LS, MIN(PHI_MAX_LS, PHI_LS - DT_LS*FLUX0_LS))
+! DIAGNOSTIC: PHI clamp to [-1,1] disabled (restore master unclamped RK update)
+ PHI1_LS = PHI_LS - DT_LS*FLUX0_LS
 
 !RK Stage2
  RK2_PREDICTOR_LS = .FALSE.
@@ -4435,8 +4432,8 @@ DO WHILE (TIME_LS < T_FINAL)
    CALL LEVEL_SET_SR_CROWNFIRE_OR_NOT(NM)
  ENDIF
  CALL LEVEL_SET_ADVECT_FLUX(NM)
-!Clamp as in RK Stage 1
- PHI_LS = MAX(PHI_MIN_LS, MIN(PHI_MAX_LS, PHI_LS - 0.5_EB*DT_LS*(FLUX0_LS + FLUX1_LS)))
+! DIAGNOSTIC: PHI clamp disabled
+ PHI_LS = PHI_LS - 0.5_EB*DT_LS*(FLUX0_LS + FLUX1_LS)
 
 !The following is done here instead of in Stage 1 RK so updated ROS can be used in coupled LS when
 !determining if fire residence time is shorter than a time step.
