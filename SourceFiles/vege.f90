@@ -3642,7 +3642,8 @@ ENDIF
 
 !
 ! --- Use user supplied grid index to specifiy U2MAGL
-IF (UAVG_K > 0) THEN
+! DIAGNOSTIC ROLLBACK: restore master UAVG_K test (/= -1) and MODE-4 ROS wind averaging
+IF (UAVG_K /= -1) THEN
 
 !Unaveraged velocity components at k=UAVG_K
   U2MAGL = U(I,J,UAVG_K)
@@ -3687,11 +3688,11 @@ IF (UAVG_K > 0) THEN
 
 ENDIF
 
-! -- Use U0,V0 to define THETA_ELPS. This is needed for LS5 when the ambient wind speed is zero 
+! -- Use U0,V0 to define THETA_ELPS. This is need for LS5 when the ambient wind speed is zero 
 !    because the local, fire generated, winds will result in a fire that does not spread as 
 !    observed (e.g., back or flank instead of head)
 !    Other wise VEG_LSET_UAVG_K needs to be set. 
-IF (LEVEL_SET_MODE == 6) THEN 
+IF (LEVEL_SET_MODE == 5) THEN 
   IF (U0 /= 0.0_EB .OR. V0 /= 0.0_EB) THEN
     U2MAGL = U0
     V2MAGL = V0
@@ -3716,16 +3717,15 @@ UMF(I,J) = SQRT(U2MAGL**2 + V2MAGL**2)*60._EB !m/min place holder until proper W
 
 !--Empirical relation based on WFDS runs in C064 AU grassland experiment with M=6
 
-!Use instantaneous Umag, computed above, in empirical ROS vs umag equation
-IF(LEVEL_SET_MODE == 4 .AND. UAVG_TIME < 0.0) THEN 
+! DIAGNOSTIC ROLLBACK: master applies instantaneous ROS every call for MODE/=5, then may
+! overwrite with time-averaged Umag. Latest only used averaging when UAVG_TIME>0 (default 10s).
+IF(LEVEL_SET_MODE /= 5) THEN 
+
+!Use instantaneous umag in empirical ROS vs umag equation
   UMAG = SQRT(U2MAGL**2 + V2MAGL**2)
   ROS_HEAD_SURF(I,J)  = 0.099_EB + 0.095_EB*UMAG + 0.0025_EB*UMAG**2
-ENDIF
 
-!Find the time averaged U,V
-IF(LEVEL_SET_MODE == 4 .AND. UAVG_TIME > 0.0) THEN 
-
-!Find time average of Umag and use in empirical ROS vs umag equation
+!Find time average of Umag and use in emprical ROS vs umag equation
   U_LS_AVG(I,J)  = U_LS_AVG(I,J) + U2MAGL
   V_LS_AVG(I,J)  = V_LS_AVG(I,J) + V2MAGL
   NSUM_T_UAVG_LS = NSUM_T_UAVG_LS + 1
@@ -3744,9 +3744,11 @@ IF(LEVEL_SET_MODE == 4 .AND. UAVG_TIME > 0.0) THEN
     FIRST_AVG_FLAG_LS = 1
   ENDIF
 
-ENDIF
+ELSE
 
-IF (LEVEL_SET_MODE == 5) ROS_HEAD_SURF(I,J) = ROS_HEAD_CONSTANT
+  ROS_HEAD_SURF(I,J) = ROS_HEAD_CONSTANT
+
+ENDIF
 
 END SUBROUTINE ROSVSU_HEADROS
 !
