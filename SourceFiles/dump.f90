@@ -645,11 +645,17 @@ ENDIF
 
 ! Open vegetation ouput files(s) for Fuel Element model
 
+N_TREE = 0
 !DO N=1,N_TREES_OUTPUT_DATA 
 DO N=1,N_TREES 
  IF (VEG_LABELS(N) == 'no_tree_data_output') CYCLE
- N_TREE = N_TREE_OUT(N)
-print*,'dump:N_TREE,LU_VEG_OUT,FN_VEG_OUT',n_tree,lu_veg_out(n_tree),fn_veg_out(n_tree)
+!N_TREE = N_TREE_OUT(N)
+ IF(N_TREE /= N_TREE_OUT(N)) THEN !needed for case in which trees are made of multiple &RECT lines
+   N_TREE = N_TREE_OUT(N) 
+ ELSE
+   CYCLE
+ ENDIF
+print '(A,1x,I10,1x,I4,1x,I4,1x,I4,1x,A)','dump:N_TREES,N,N_TREE,LU_VEG_OUT,FN_VEG_OUT',n_trees,n,n_tree,lu_veg_out(n_tree),fn_veg_out(n_tree)
  IF (APPEND) THEN
     OPEN(LU_VEG_OUT(N_TREE),FILE=FN_VEG_OUT(N_TREE),FORM='FORMATTED',STATUS='OLD',POSITION='APPEND')
  ELSE
@@ -4121,9 +4127,9 @@ SUBROUTINE UPDATE_DEVICES(T,NM)
 USE MEMORY_FUNCTIONS, ONLY : RE_ALLOCATE_STRINGS
 USE EVAC, ONLY: N_DOORS, N_EXITS, N_ENTRYS, EVAC_DOORS, EVAC_EXITS, EVAC_ENTRYS, EVAC_EXIT_TYPE, EVAC_DOOR_TYPE, EVAC_ENTR_TYPE
 REAL(EB), INTENT(IN) :: T
-REAL(EB) :: VALUE,STAT_VALUE,SUM_VALUE,VOL,WGT,T_TMP,VALUE_LOC
-INTEGER :: NM,N,I,J,K,STAT_COUNT,IW,SURF_INDEX,I_STATE,IND,II1,II2,JJ1,JJ2,KK1,KK2
-LOGICAL :: NOT_FOUND,IS_LOC_STAT
+REAL(EB) :: VALUE,STAT_VALUE,SUM_VALUE,VOL,WGT,T_TMP
+INTEGER :: NM,N,I,J,K,STAT_COUNT,IW,SURF_INDEX,I_STATE,IND
+LOGICAL :: NOT_FOUND
  
 CALL POINT_TO_MESH(NM)
 
@@ -4136,11 +4142,7 @@ WGT = DT/(MIN(MAX(DT,T-T_BEGIN),DT_DEVC_LINE))
 DEVICE_LOOP: DO N=1,N_DEVC
 
    DV => DEVICE(N)
-   IS_LOC_STAT = (DV%STATISTICS(1:6)=='MAXLOC' .OR. DV%STATISTICS(1:6)=='MINLOC')
-   IF (.NOT.IS_LOC_STAT .AND. DV%MESH/=NM) CYCLE DEVICE_LOOP
-   IF (IS_LOC_STAT) THEN
-      IF (XF<DV%X1 .OR. XS>DV%X2 .OR. YF<DV%Y1 .OR. YS>DV%Y2 .OR. ZF<DV%Z1 .OR. ZS>DV%Z2) CYCLE DEVICE_LOOP
-   ENDIF
+   IF (DV%MESH/=NM) CYCLE DEVICE_LOOP
    DRY = DV%DRY
    PY => PROPERTY(DV%PROP_INDEX)
 
@@ -4153,11 +4155,10 @@ DEVICE_LOOP: DO N=1,N_DEVC
    NOT_FOUND  = .TRUE.
    STAT_COUNT =  0
    SUM_VALUE = 0._EB
-   VALUE_LOC = 0._EB
    SELECT CASE(DV%STATISTICS)
-      CASE('MAX','MAXLOC X','MAXLOC Y','MAXLOC Z')
+      CASE('MAX')
          STAT_VALUE = -HUGE(0.0_EB) + 1.0_EB
-      CASE('MIN','MINLOC X','MINLOC Y','MINLOC Z')
+      CASE('MIN')
          STAT_VALUE =  HUGE(0.0_EB) - 1.0_EB
       CASE DEFAULT
          STAT_VALUE =  0.0_EB
@@ -4186,67 +4187,49 @@ DEVICE_LOOP: DO N=1,N_DEVC
 
          ELSE GAS_STATS
 
-            IF (IS_LOC_STAT) THEN
-               II1 = NINT( GINV(MAX(DV%X1,XS)-XS,1,NM)*RDXI)
-               II2 = NINT( GINV(MIN(DV%X2,XF)-XS,1,NM)*RDXI)
-               JJ1 = NINT( GINV(MAX(DV%Y1,YS)-YS,2,NM)*RDETA)
-               JJ2 = NINT( GINV(MIN(DV%Y2,YF)-YS,2,NM)*RDETA)
-               KK1 = NINT( GINV(MAX(DV%Z1,ZS)-ZS,3,NM)*RDZETA)
-               KK2 = NINT( GINV(MIN(DV%Z2,ZF)-ZS,3,NM)*RDZETA)
-               IF (II1<II2) II1 = II1 + 1
-               IF (JJ1<JJ2) JJ1 = JJ1 + 1
-               IF (KK1<KK2) KK1 = KK1 + 1
-               II1 = MAX(1,MIN(IBAR,II1)) ; II2 = MAX(1,MIN(IBAR,II2))
-               JJ1 = MAX(1,MIN(JBAR,JJ1)) ; JJ2 = MAX(1,MIN(JBAR,JJ2))
-               KK1 = MAX(1,MIN(KBAR,KK1)) ; KK2 = MAX(1,MIN(KBAR,KK2))
-            ELSE
-               II1 = DV%I1 ; II2 = DV%I2
-               JJ1 = DV%J1 ; JJ2 = DV%J2
-               KK1 = DV%K1 ; KK2 = DV%K2
-            ENDIF
-
-            DO K=KK1,KK2
-               DO J=JJ1,JJ2
-                  DEVICE_CELL_LOOP: DO I=II1,II2
+            DO K=DV%K1,DV%K2
+               DO J=DV%J1,DV%J2
+                  DEVICE_CELL_LOOP: DO I=DV%I1,DV%I2
                      IF (SOLID(CELL_INDEX(I,J,K))) CYCLE DEVICE_CELL_LOOP
                      VOL = DX(I)*RC(I)*DY(J)*DZ(K)
                      NOT_FOUND = .FALSE.
-                     VALUE = GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
-                                              DV%PART_INDEX,DV%VELO_INDEX,T,NM)
                      STATISTICS_SELECT: SELECT CASE(DV%STATISTICS)
                         CASE('MAX')
-                           STAT_VALUE = MAX(STAT_VALUE, VALUE)
+                           STAT_VALUE = MAX(STAT_VALUE, &
+                                       GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                        DV%PART_INDEX,DV%VELO_INDEX,T,NM))
                         CASE('MIN')
-                           STAT_VALUE = MIN(STAT_VALUE, VALUE)
-                        CASE('MAXLOC X','MAXLOC Y','MAXLOC Z')
-                           IF (VALUE>STAT_VALUE) THEN
-                              STAT_VALUE = VALUE
-                              IF (DV%STATISTICS=='MAXLOC X') VALUE_LOC = XC(I)
-                              IF (DV%STATISTICS=='MAXLOC Y') VALUE_LOC = YC(J)
-                              IF (DV%STATISTICS=='MAXLOC Z') VALUE_LOC = ZC(K)
-                           ENDIF
-                        CASE('MINLOC X','MINLOC Y','MINLOC Z')
-                           IF (VALUE<STAT_VALUE) THEN
-                              STAT_VALUE = VALUE
-                              IF (DV%STATISTICS=='MINLOC X') VALUE_LOC = XC(I)
-                              IF (DV%STATISTICS=='MINLOC Y') VALUE_LOC = YC(J)
-                              IF (DV%STATISTICS=='MINLOC Z') VALUE_LOC = ZC(K)
-                           ENDIF
+                           STAT_VALUE = MIN(STAT_VALUE, &
+                                       GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                        DV%PART_INDEX,DV%VELO_INDEX,T,NM))
                         CASE('MEAN')
-                           STAT_VALUE = STAT_VALUE + VALUE
+                           STAT_VALUE = STAT_VALUE + &
+                                       GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                        DV%PART_INDEX,DV%VELO_INDEX,T,NM)
                            STAT_COUNT = STAT_COUNT + 1
                         CASE('VOLUME INTEGRAL')
-                           STAT_VALUE = STAT_VALUE + VALUE*VOL
+                           STAT_VALUE = STAT_VALUE + &
+                                       GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                        DV%PART_INDEX,DV%VELO_INDEX,T,NM)*VOL
                         CASE('MASS INTEGRAL')
-                           STAT_VALUE = STAT_VALUE + VALUE*VOL*RHO(I,J,K)
+                           STAT_VALUE = STAT_VALUE + &
+                                       GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                        DV%PART_INDEX,DV%VELO_INDEX,T,NM)* &
+                                       VOL*RHO(I,J,K)
                         CASE('AREA INTEGRAL')
                            SELECT CASE (ABS(DV%IOR))
                               CASE(1)
-                                 STAT_VALUE = STAT_VALUE + RC(I)*DY(J)*DZ(K)*VALUE
+                                 STAT_VALUE = STAT_VALUE + RC(I)*DY(J)*DZ(K)* &
+                                              GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                               DV%PART_INDEX,DV%VELO_INDEX,T,NM)                              
                               CASE(2)
-                                 STAT_VALUE = STAT_VALUE + DX(I)*DZ(K)*VALUE
+                                 STAT_VALUE = STAT_VALUE + DX(I)*DZ(K)* &
+                                              GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                               DV%PART_INDEX,DV%VELO_INDEX,T,NM)                              
                               CASE(3)
-                                 STAT_VALUE = STAT_VALUE + DX(I)*RC(I)*DY(J)*VALUE
+                                 STAT_VALUE = STAT_VALUE + DX(I)*RC(I)*DY(J)* &
+                                              GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                               DV%PART_INDEX,DV%VELO_INDEX,T,NM)                              
                            END SELECT
                         CASE('TENSOR SURFACE INTEGRAL')
                            ! similar to 'AREA INTEGRAL' but multiplies by outward unit normal and sums along outside of volume XB
@@ -4272,10 +4255,14 @@ DEVICE_LOOP: DO N=1,N_DEVC
                            ENDIF
                         
                         CASE('VOLUME MEAN')
-                           STAT_VALUE = STAT_VALUE + VALUE*VOL
+                           STAT_VALUE = STAT_VALUE + &
+                                        GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,DV%Z_INDEX,&
+                                                         DV%PART_INDEX,DV%VELO_INDEX,T,NM)*VOL
                            SUM_VALUE = SUM_VALUE + VOL
                         CASE('MASS MEAN')
-                           STAT_VALUE = STAT_VALUE + VOL*RHO(I,J,K)*VALUE
+                           STAT_VALUE = STAT_VALUE + VOL*RHO(I,J,K)* &
+                                        GAS_PHASE_OUTPUT(I,J,K,DV%OUTPUT_INDEX,0,DV%Y_INDEX,&
+                                                         DV%Z_INDEX,DV%PART_INDEX,DV%VELO_INDEX,T,NM)
                            SUM_VALUE = SUM_VALUE + VOL*RHO(I,J,K)
                      END SELECT STATISTICS_SELECT
                   ENDDO DEVICE_CELL_LOOP
@@ -4307,31 +4294,20 @@ DEVICE_LOOP: DO N=1,N_DEVC
             SURF_INDEX = WALL(IW)%SURF_INDEX
             IF (DV%SURF_ID=='null' .OR. SURFACE(SURF_INDEX)%ID==DV%SURF_ID) THEN
                NOT_FOUND = .FALSE.
-               VALUE = SOLID_PHASE_OUTPUT(NM,IW,ABS(DV%OUTPUT_INDEX),DV%Y_INDEX,DV%Z_INDEX,DV%PART_INDEX)
                SELECT CASE(DV%STATISTICS)
                   CASE('MAX')
-                     STAT_VALUE = MAX(STAT_VALUE,VALUE)
+                     STAT_VALUE = MAX(STAT_VALUE,SOLID_PHASE_OUTPUT(NM,IW,ABS(DV%OUTPUT_INDEX),DV%Y_INDEX,DV%Z_INDEX,&
+                                      DV%PART_INDEX))
                   CASE('MIN')
-                     STAT_VALUE = MIN(STAT_VALUE,VALUE)
-                  CASE('MAXLOC X','MAXLOC Y','MAXLOC Z')
-                     IF (VALUE>STAT_VALUE) THEN
-                        STAT_VALUE = VALUE
-                        IF (DV%STATISTICS=='MAXLOC X') VALUE_LOC = WALL(IW)%XW
-                        IF (DV%STATISTICS=='MAXLOC Y') VALUE_LOC = WALL(IW)%YW
-                        IF (DV%STATISTICS=='MAXLOC Z') VALUE_LOC = WALL(IW)%ZW
-                     ENDIF
-                  CASE('MINLOC X','MINLOC Y','MINLOC Z')
-                     IF (VALUE<STAT_VALUE) THEN
-                        STAT_VALUE = VALUE
-                        IF (DV%STATISTICS=='MINLOC X') VALUE_LOC = WALL(IW)%XW
-                        IF (DV%STATISTICS=='MINLOC Y') VALUE_LOC = WALL(IW)%YW
-                        IF (DV%STATISTICS=='MINLOC Z') VALUE_LOC = WALL(IW)%ZW
-                     ENDIF
+                     STAT_VALUE = MIN(STAT_VALUE,SOLID_PHASE_OUTPUT(NM,IW,ABS(DV%OUTPUT_INDEX),DV%Y_INDEX,DV%Z_INDEX,&
+                                      DV%PART_INDEX))
                   CASE('MEAN')
-                     STAT_VALUE = STAT_VALUE + VALUE
+                     STAT_VALUE = STAT_VALUE + SOLID_PHASE_OUTPUT(NM,IW,ABS(DV%OUTPUT_INDEX),DV%Y_INDEX,DV%Z_INDEX,&
+                                                                  DV%PART_INDEX)
                      STAT_COUNT = STAT_COUNT + 1
                   CASE('SURFACE INTEGRAL')
-                     STAT_VALUE = STAT_VALUE + VALUE*WALL(IW)%AW 
+                     STAT_VALUE = STAT_VALUE + SOLID_PHASE_OUTPUT(NM,IW,ABS(DV%OUTPUT_INDEX),DV%Y_INDEX,DV%Z_INDEX,&
+                                                                  DV%PART_INDEX)*WALL(IW)%AW 
                END SELECT
             ENDIF
          ENDDO WALL_CELL_LOOP
@@ -4348,20 +4324,6 @@ DEVICE_LOOP: DO N=1,N_DEVC
       CASE('TIME INTEGRAL')
       CASE('MASS MEAN','VOLUME MEAN')
          VALUE = STAT_VALUE / SUM_VALUE
-      CASE('MAXLOC X','MAXLOC Y','MAXLOC Z')
-         IF (.NOT.NOT_FOUND .AND. STAT_VALUE>DV%TEMP_STAT_VALUE) THEN
-            DV%TEMP_STAT_VALUE = STAT_VALUE
-            VALUE = VALUE_LOC
-         ELSE
-            CYCLE DEVICE_LOOP
-         ENDIF
-      CASE('MINLOC X','MINLOC Y','MINLOC Z')
-         IF (.NOT.NOT_FOUND .AND. STAT_VALUE<DV%TEMP_STAT_VALUE) THEN
-            DV%TEMP_STAT_VALUE = STAT_VALUE
-            VALUE = VALUE_LOC
-         ELSE
-            CYCLE DEVICE_LOOP
-         ENDIF
       CASE DEFAULT
          IF (NOT_FOUND) STAT_VALUE = 0._EB
          STAT_COUNT = MAX(STAT_COUNT,1)

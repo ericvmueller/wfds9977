@@ -453,6 +453,7 @@ END SUBROUTINE DEVICE_PARTICLE_INSERT
 
 SUBROUTINE  WALL_PARTICLE_INSERT
 TYPE(WALL_TYPE), POINTER :: WC=>NULL()
+REAL(EB) :: TE_RAMP_FCTR !time ramp (RAMP_Q or TAU_Q) applied to HRRPUA of a thermal element burner
    ! Loop through all boundary cells and insert particles if appropriate
     
 WALL_INSERT_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
@@ -477,7 +478,22 @@ WALL_INSERT_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
 ! Program flow control for Level Set fire front propagation. Controls whether or not particles are inserted at the fire front.
    IF (VEG_LEVEL_SET_SURFACE_HEATFLUX .AND. WC%QCONF >= 0.0_EB)  CYCLE WALL_INSERT_LOOP !for Level Set with convective flux BC
    IF (VEG_LEVEL_SET_THERMAL_ELEMENTS .AND. .NOT. WC%LSET_FIRE)  CYCLE WALL_INSERT_LOOP !for Level Set with Thermal Elements
-   
+
+! Time ramp for a thermal element burner (MISC THERMAL_ELEMENTS=.TRUE., no Level Set). The burner is
+! on for the whole simulation unless the SURF carries a RAMP_Q or TAU_Q, which is applied here in
+! exactly the same way that it would be applied to the fuel mass flux of a conventional HRRPUA
+! burner. No fire front test is needed: every wall cell of the burner emits thermal elements.
+   TE_RAMP_FCTR = 1.0_EB
+   IF (SF%THERMAL_ELEMENT_BURNER) THEN
+      IF (ABS(WC%TW-T_BEGIN)<=ZERO_P .AND. SF%RAMP_INDEX(TIME_HEAT)>=1) THEN
+         TSI = T
+      ELSE
+         TSI = T - WC%TW
+      ENDIF
+      TE_RAMP_FCTR = EVALUATE_RAMP(TSI,SF%TAU(TIME_HEAT),SF%RAMP_INDEX(TIME_HEAT))
+      IF (TE_RAMP_FCTR <= 0.0_EB) CYCLE WALL_INSERT_LOOP !burner is off, emit nothing
+   ENDIF
+
    II = WC%II
    JJ = WC%JJ
    KK = WC%KK
@@ -597,6 +613,19 @@ WALL_INSERT_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
 !       LP%LSET_HRRPUV = -WC%VEG_LSET_SURFACE_HEATFLUX*SF%DT_INSERT/(0.5*PC%TE_BURNTIME*DZ(KK)*WC%NPPCW) !linear HRRPUV decay with time
         LP%LSET_HRRPUV = -WC%VEG_LSET_SURFACE_HEATFLUX*SF%DT_INSERT/(PC%TE_BURNTIME*DZ(KK)*WC%NPPCW) !no HRRPUV decay with time
 !print '(A,ES12.4)','hrrpuv',lp%lset_hrrpuv
+      ENDIF
+
+! Determine initial HRRPUV of a thermal element emitted by a fixed HRRPUA burner (no Level Set).
+! Same expression as the Level Set version above, with the level set surface heat flux replaced by
+! the (ramped) HRRPUA of the SURF, W/m^2. Each batch of WC%NPPCW elements carries the energy
+! released by this wall cell over one insertion interval SF%DT_INSERT, spread uniformly over the
+! element's burn time PC%TE_BURNTIME. DZ(KK) converts the surface heat flux to a volumetric heat
+! release rate using the height of the grid cell at the burner. Summed over all elements that are
+! alive at any instant, the total heat release rate returns HRRPUA*(burner area), independent of
+! both TE_BURNTIME and NPPC: those two only redistribute the heat in time and space.
+      IF (SF%THERMAL_ELEMENT_BURNER) THEN
+        LP%LSET_THERMAL_ELEMENT = .TRUE.
+        LP%LSET_HRRPUV = TE_RAMP_FCTR*SF%HRRPUA*SF%DT_INSERT/(PC%TE_BURNTIME*DZ(KK)*WC%NPPCW) !W/m^3
       ENDIF
 
    ENDDO PARTICLE_INSERT_LOOP2
@@ -1222,8 +1251,18 @@ ENDDO PARTICLE_LOOP
 PART_CFL = DT*P_UVWMAX
 
 ! Remove out-of-bounds particles
- 
-IF (.NOT. LP%LSET_THERMAL_ELEMENT) CALL REMOVE_PARTICLES(T,NM)
+!
+! NOTE: this line previously read
+!         IF (.NOT. LP%LSET_THERMAL_ELEMENT) CALL REMOVE_PARTICLES(T,NM)
+! PARTICLE_LOOP has ended by this point, so LP is left pointing at whichever particle happened to
+! be visited last. The test was therefore effectively arbitrary: on any time step whose last
+! particle was a thermal element, removal was skipped for the entire mesh and expired particles
+! accumulated. Removal is now always performed. Thermal elements are still protected from being
+! removed before they have finished releasing their heat by
+!   PC%LIFETIME = MAX(PC%TE_BURNTIME,PC%LIFETIME)
+! set in read.f90, which is the test REMOVE_PARTICLES actually applies (T-LP%T > PC%LIFETIME).
+
+CALL REMOVE_PARTICLES(T,NM)
 
 END SUBROUTINE MOVE_PARTICLES
 

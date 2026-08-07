@@ -8394,7 +8394,10 @@ ENDDO EXCHANGE_SEND_LOOP1
 !!!----------------------------------------------------------------------------------------------------
 !!! Information from Mesh NM is received by Mesh NOM  (NOM receiver, NM sender)
 !!!----------------------------------------------------------------------------------------------------
-IF (USE_MPI.AND.NREQ_SCARC/=0) CALL MPI_WAITALL(NREQ_SCARC,REQ_SCARC(1:NREQ_SCARC),MPI_STATUS_IGNORE,IERR)
+!orig IF (USE_MPI.AND.NREQ_SCARC/=0) CALL MPI_WAITALL(NREQ_SCARC,REQ_SCARC(1:NREQ_SCARC),MPI_STATUS_IGNORE,IERR)
+!rm ->
+IF (USE_MPI.AND.NREQ_SCARC/=0) CALL MPI_WAITALL(NREQ_SCARC,REQ_SCARC(1:NREQ_SCARC),MPI_STATUSES_IGNORE,IERR)
+!rm <-
 
 
 !!!----------------------------------------------------------------------------------------------------

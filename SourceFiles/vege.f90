@@ -13,7 +13,7 @@ PRIVATE
 PUBLIC INITIALIZE_LEVEL_SET_FIREFRONT,LEVEL_SET_FIREFRONT_PROPAGATION,END_LEVEL_SET,INITIALIZE_RAISED_VEG, &
        DEALLOCATE_VEG_ARRAYS,RAISED_VEG_MASS_ENERGY_TRANSFER,GET_REV_vege, &
        BNDRY_VEG_MASS_ENERGY_TRANSFER,LEVEL_SET_BC,LEVEL_SET_DT,READ_BRNR,INITIALIZE_RAISED_VEG_FROM_FILE, &
-       CREATE_RAISED_VEG_FILE,INITIALIZE_RAISED_VEG_FROM_FILE_2
+       CREATE_RAISED_VEG_FILE,INITIALIZE_RAISED_VEG_FROM_FILE_2,THERMAL_ELEMENT_HEAT_RELEASE
 TYPE (PARTICLE_TYPE), POINTER :: LP=>NULL()
 TYPE (PARTICLE_CLASS_TYPE), POINTER :: PC=>NULL()
 !TYPE (WALL_TYPE), POINTER :: WC
@@ -386,9 +386,9 @@ TREE_LOOP: DO NCT=1,N_TREES
          LP%VEG_VOLFRACTION = 1._EB
          LP%TAG = PARTICLE_TAG
 !        LP%TAG = NCT !added to assign a number to each &TREE with OUTPUT=T
-         LP%X = REAL(NXB,EB)
+         LP%X = REAL(NXB,EB) 
          LP%Y = REAL(NYB,EB)
-         LP%Z = REAL(NZB,EB)
+         LP%Z = REAL(NZB,EB) 
          LP%CLASS = IPC
          LP%PWT   = 1._EB  ! This is not used, but it is necessary to assign a non-zero weight factor to each particle
          VEG_PRESENT_FLAG(NXB,NYB,NZB) = .TRUE.
@@ -562,12 +562,16 @@ TREE_LOOP: DO NCT=1,N_TREES
                 LP%CLASS = IPC
                 LP%PWT   = 1._EB  ! This is not used, but it is necessary to assign a non-zero weight factor to each particle
                 VEG_PRESENT_FLAG(NXB,NYB,NZB) = .TRUE.
-! -- Determine volume fraction occupied by vegetation in cell
+! -- Determine volume fraction occupied by vegetation in cell this is only in the vertical direction, needs mod for x,y direction
                 IF (TREEZS <= Z(NZB).AND. TREEZF < Z(NZB+1)) LP%VEG_VOLFRACTION = LP%VEG_VOLFRACTION - (Z(NZB+1)-TREEZF)/DZ(NZB)
                 IF (TREEZS >  Z(NZB)) THEN
                   LP%VEG_VOLFRACTION = LP%VEG_VOLFRACTION - (TREEZS-Z(NZB))/DZ(NZB)
                   IF (TREEZF < Z(NZB+1)) LP%VEG_VOLFRACTION = LP%VEG_VOLFRACTION - (Z(NZB+1)-TREEZF)/DZ(NZB)
                 ENDIF
+                IF(VOLFRAC_RECT_VEG(N_RECT_TREE) > 0._EB) LP%VEG_VOLFRACTION = 1._EB !This is to avoid automatic vol frac computation
+                                                                                     !The value of VOLFRAC_RECT_VEG=1 in read.f90
+                                                                                     !Need to add parameter in &TREE to turn vol frac
+                                                                                     !computation on or off
               ENDIF
             ENDDO
           ENDIF
@@ -711,6 +715,7 @@ TREE_LOOP: DO NCT=1,N_TREES
         LP%X = X(NXB) - 0.5_EB*DX(NXB)
         LP%Y = Y(NYB) - 0.5_EB*DY(NYB)
         LP%Z = Z(NZB) - 0.5_EB*DZ(NZB)
+
         IF (VEG_FUEL_GEOM(NCT) == 'RECTANGLE')THEN
          LP%X = X(NXB) + 0.5_EB*DX(NXB)
          LP%Y = Y(NYB) + 0.5_EB*DY(NYB)
@@ -1460,6 +1465,7 @@ TIME_SUBCYCLING_LOOP: DO IDT=1,NDT_CYCLES
    ENDIF IF_NOT_IGNITOR1
  ENDIF IF_VEG_DEGRADATION_ARRHENIUS
 
+ IF(MPV_VEG <= MPV_VEG_MIN .AND. PC%VEG_KEEP_FOR_SMV) TMP_VEG_NEW = TMP_GAS
  LP%TMP = TMP_VEG_NEW
 !LP%TMP = TMP_VEG !TGA sets temperature
  LP%VEG_EMISS = 4.*SIGMA*LP%VEG_KAPPA*LP%TMP**4 !used in RTE solver
@@ -1499,6 +1505,7 @@ TIME_SUBCYCLING_LOOP: DO IDT=1,NDT_CYCLES
 
 
  TMP_VEG   = TMP_VEG_NEW
+
  IF (MPV_MOIST <= MPV_MOIST_MIN) THEN !for time sub cycling
   MPV_MOIST = 0.0_EB
   MW_VEG_MOIST_TERM = 0.0_EB
@@ -1571,9 +1578,10 @@ ENDDO TIME_SUBCYCLING_LOOP
 
  ENDIF THERMAL_CALC  ! end of thermally thin heat transfer, etc. calculations
 
-! Fill arrays for outputting vegetation variables when OUTPUT_TREE=.TRUE.
+! Fill arrays for outputting vegetation variables when OUTPUT_TREE=.TRUE. and particle
+! is still present
  N_TREE = LP%VEG_N_TREE_OUTPUT
- IF (N_TREE /= 0) THEN
+ IF (N_TREE /= 0 .AND. LP%VEG_PACKING_RATIO > 0.0_EB) THEN
   TREE_OUTPUT_DATA(N_TREE,1,NM) = TREE_OUTPUT_DATA(N_TREE,1,NM) + LP%TMP - 273._EB !C
   TREE_OUTPUT_DATA(N_TREE,2,NM) = TREE_OUTPUT_DATA(N_TREE,2,NM) + TMP_GAS - 273._EB !C
   TREE_OUTPUT_DATA(N_TREE,3,NM) = TREE_OUTPUT_DATA(N_TREE,3,NM) + LP%VEG_FUEL_MASS*V_CELL*VEG_VF !kg
@@ -3000,11 +3008,15 @@ LSET_INIT_WALL_CELL_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
   JJG = WC%JJG
   KKG = WC%KKG
 
-! Ignite landscape at user specified location if ignition is at time zero
-  IF (SF%VEG_LSET_IGNITE_TIME == 0.0_EB .AND. T_BEGIN >= 0._EB) THEN 
+! Ignite landscape at user specified location if ignition is at time zero. The cell is lit across
+! its full width (XLEAD_LS=1) with the residence clock at zero so a fuel-carrying ignitor SURF
+! burns its fuel load (see LEVEL_SET_FIREFRONT_PROPAGATION); formerly BURN_TIME_LS=99999 marked
+! these cells as already burned out and their fuel was discarded.
+  IF (SF%VEG_LSET_IGNITE_TIME == 0.0_EB .AND. T_BEGIN >= 0._EB) THEN
 !print '(A,ES12.4,1x,3I)','veg1:LS lset_ignite_time,iig,jjg ',sf%veg_lset_ignite_time,iig,jjg
-    PHI_LS(IIG,JJG) = PHI_MAX_LS 
-    BURN_TIME_LS(IIG,JJG) = 99999.0_EB
+    PHI_LS(IIG,JJG) = PHI_MAX_LS
+    BURN_TIME_LS(IIG,JJG) = 0.0_EB
+    XLEAD_LS(IIG,JJG) = 1.0_EB
 !   IF (SF%HRRPUA > 0.0_EB) THEN !mimic burner
 !     WC%VEG_LSET_SURFACE_HEATFLUX = -SF%HRRPUA
 !     IF (VEG_LEVEL_SET_SURFACE_HEATFLUX) WC%QCONF = WC%VEG_LSET_SURFACE_HEATFLUX
@@ -3588,8 +3600,7 @@ Z2MAGL = 2.0_EB  !Height in WFDS wind grid that's 2m above ground level
 ZWFDS  = ZC(K) - Z(K-1) !Height of velocity in first cell above veg, ZC(K)=cell center, Z(K-1)=height of K cell bottom
 UNIFORM_UV = .FALSE.
 !
-!Find the wind components at 2 m above the ground for the case of a uniform
-!wind field  
+!Find the wind components at 2 m above the ground for the case of a uniform wind field  
 !N_CSVF = 0 when no initial wind field has been read in from a file.
 IF (N_CSVF == 0 .AND. VEG_LEVEL_SET_UNCOUPLED) THEN
   U2MAGL = U_LS(I,J) 
@@ -3631,7 +3642,7 @@ ENDIF
 
 !
 ! --- Use user supplied grid index to specifiy U2MAGL
-IF (UAVG_K /= -1) THEN
+IF (UAVG_K > 0) THEN
 
 !Unaveraged velocity components at k=UAVG_K
   U2MAGL = U(I,J,UAVG_K)
@@ -3639,6 +3650,14 @@ IF (UAVG_K /= -1) THEN
 
 ! U2MAGL = 0.5_EB*(U(I,J,2) + U(I,J,3))
 ! V2MAGL = 0.5_EB*(V(I,J,2) + V(I,J,3))
+
+!9 point spatial average
+! U2MAGL = 0.111111_EB*( U(I-1,J-1,UAVG_K) + U(I-1,J,UAVG_K) + U(I-1,J+1,UAVG_K) + &
+!                        U(I  ,J-1,UAVG_K) + U(I  ,J,UAVG_K) + U(I  ,J+1,UAVG_K) + &
+!                        U(I+1,J-1,UAVG_K) + U(I+1,J,UAVG_K) + U(I+1,J+1,UAVG_K) )
+! V2MAGL = 0.111111_EB*( V(I-1,J-1,UAVG_K) + V(I-1,J,UAVG_K) + V(I-1,J+1,UAVG_K) + &
+!                        V(I  ,J-1,UAVG_K) + V(I  ,J,UAVG_K) + V(I  ,J+1,UAVG_K) + &
+!                        V(I+1,J-1,UAVG_K) + V(I+1,J,UAVG_K) + V(I+1,J+1,UAVG_K) )
 
 !4 point horizontal average of U at k=UAVG_K where UAVG_K is specifice in the input file
 ! U2MAGL = 0.25_EB*( U(I-1,J,UAVG_K) + U(I,J+1,UAVG_K) + U(I+1,J,UAVG_K) + U(I,J-1,UAVG_K) )
@@ -3668,11 +3687,11 @@ IF (UAVG_K /= -1) THEN
 
 ENDIF
 
-! -- Use U0,V0 to define THETA_ELPS. This is need for LS5 when the ambient wind speed is zero 
+! -- Use U0,V0 to define THETA_ELPS. This is needed for LS5 when the ambient wind speed is zero 
 !    because the local, fire generated, winds will result in a fire that does not spread as 
 !    observed (e.g., back or flank instead of head)
 !    Other wise VEG_LSET_UAVG_K needs to be set. 
-IF (LEVEL_SET_MODE == 5) THEN 
+IF (LEVEL_SET_MODE == 6) THEN 
   IF (U0 /= 0.0_EB .OR. V0 /= 0.0_EB) THEN
     U2MAGL = U0
     V2MAGL = V0
@@ -3697,13 +3716,16 @@ UMF(I,J) = SQRT(U2MAGL**2 + V2MAGL**2)*60._EB !m/min place holder until proper W
 
 !--Empirical relation based on WFDS runs in C064 AU grassland experiment with M=6
 
-IF(LEVEL_SET_MODE /= 5) THEN 
-
-!Use instantaneous umag in empirical ROS vs umag equation
+!Use instantaneous Umag, computed above, in empirical ROS vs umag equation
+IF(LEVEL_SET_MODE == 4 .AND. UAVG_TIME < 0.0) THEN 
   UMAG = SQRT(U2MAGL**2 + V2MAGL**2)
   ROS_HEAD_SURF(I,J)  = 0.099_EB + 0.095_EB*UMAG + 0.0025_EB*UMAG**2
+ENDIF
 
-!Find time average of Umag and use in emprical ROS vs umag equation
+!Find the time averaged U,V
+IF(LEVEL_SET_MODE == 4 .AND. UAVG_TIME > 0.0) THEN 
+
+!Find time average of Umag and use in empirical ROS vs umag equation
   U_LS_AVG(I,J)  = U_LS_AVG(I,J) + U2MAGL
   V_LS_AVG(I,J)  = V_LS_AVG(I,J) + V2MAGL
   NSUM_T_UAVG_LS = NSUM_T_UAVG_LS + 1
@@ -3722,11 +3744,9 @@ IF(LEVEL_SET_MODE /= 5) THEN
     FIRST_AVG_FLAG_LS = 1
   ENDIF
 
-ELSE
-
-  ROS_HEAD_SURF(I,J) = ROS_HEAD_CONSTANT
-
 ENDIF
+
+IF (LEVEL_SET_MODE == 5) ROS_HEAD_SURF(I,J) = ROS_HEAD_CONSTANT
 
 END SUBROUTINE ROSVSU_HEADROS
 !
@@ -3958,6 +3978,7 @@ IF (VEG_LEVEL_SET_COUPLED) THEN
  DT_LS   = MESHES(NM)%DT
  TIME_LS = T_CFD
  T_FINAL = TIME_LS + DT_LS
+ IF(VEG_LEVEL_SET_LS_COMPUTE_TIME > 0._EB) T_FINAL = TIME_LS + VEG_LEVEL_SET_LS_COMPUTE_TIME
 ENDIF
 
 IF (VEG_LEVEL_SET_UNCOUPLED) THEN
@@ -4052,15 +4073,26 @@ DO WHILE (TIME_LS < T_FINAL)
   IOR = WC%IOR
   
 !-Ignite landscape at user specified location(s) and time(s) to originate Level Set fire front propagation
+! Ignitor cells are lit across their full width at once: XLEAD_LS=1 with the residence clock at
+! zero, so that a fuel-carrying ignitor SURF releases its fuel energy over VEG_LSET_FIREBASE_TIME
+! (the per-cell energy budget then ends the burn). Previously these cells were marked with
+! BURN_TIME_LS=99999, which the heat flux logic read as "already burned out" - an ignitor cell's
+! fuel load was silently discarded.
   IF (SF%VEG_LSET_IGNITE_TIME > 0.0_EB .AND. SF%VEG_LSET_IGNITE_TIME < DT_LS .AND. T_CFD >= 0._EB) THEN
 !print '(A,ES12.4,1x,3I)','veg2:LS lset_ignite_time,iig,jjg ',sf%veg_lset_ignite_time,iig,jjg
-    PHI_LS(IIG,JJG) = PHI_MAX_LS 
-    BURN_TIME_LS(IIG,JJG) = 99999.0_EB
+    IF (PHI_LS(IIG,JJG) < PHI_MAX_LS) THEN !first time only; burn state is already set otherwise
+      PHI_LS(IIG,JJG) = PHI_MAX_LS
+      BURN_TIME_LS(IIG,JJG) = 0.0_EB
+      XLEAD_LS(IIG,JJG) = 1.0_EB
+    ENDIF
   ENDIF
-  IF (SF%VEG_LSET_IGNITE_TIME >= TIME_LS .AND. SF%VEG_LSET_IGNITE_TIME <= TIME_LS + DT_LS .AND. T_CFD >= 0._EB) THEN 
+  IF (SF%VEG_LSET_IGNITE_TIME >= TIME_LS .AND. SF%VEG_LSET_IGNITE_TIME <= TIME_LS + DT_LS .AND. T_CFD >= 0._EB) THEN
 !print '(A,ES12.4,1x,3I)','veg3:LS lset_ignite_time,iig,jjg ',sf%veg_lset_ignite_time,iig,jjg
-    PHI_LS(IIG,JJG) = PHI_MAX_LS 
-    BURN_TIME_LS(IIG,JJG) = 99999.0_EB
+    IF (PHI_LS(IIG,JJG) < PHI_MAX_LS) THEN
+      PHI_LS(IIG,JJG) = PHI_MAX_LS
+      BURN_TIME_LS(IIG,JJG) = 0.0_EB
+      XLEAD_LS(IIG,JJG) = 1.0_EB
+    ENDIF
   ENDIF
 
   IF (.NOT. SF%VEG_LSET_SPREAD) CYCLE WALL_CELL_LOOP1
@@ -4166,97 +4198,100 @@ DO WHILE (TIME_LS < T_FINAL)
 
 !--- Compute heat flux into atmosphere
     GRIDCELL_TIME  = 0.0_EB
+    RGRIDCELL_TIME = 0.0_EB !zero for a cell whose local ROS is (currently) zero: front stalled, edges do not advance
     RFIREBASE_TIME = 1.0_EB/SF%VEG_LSET_FIREBASE_TIME
     ROS_MAG = SQRT(SR_X_LS(IIG,JJG)**2 + SR_Y_LS(IIG,JJG)**2)
     IF(ROS_MAG > 0.0_EB) THEN
       GRIDCELL_TIME = SQRT(DX(IIG)**2 + DY(JJG)**2)/ROS_MAG
       RGRIDCELL_TIME = 1.0_EB/GRIDCELL_TIME
-      GRIDCELL_FRACTION = MIN(1.0_EB,SF%VEG_LSET_FIREBASE_TIME*RGRIDCELL_TIME) !assumes spread direction parallel to grid axes
     ENDIF
-    BURNTIME = MAX(SF%VEG_LSET_FIREBASE_TIME,GRIDCELL_TIME) !assumes spread direction parallel to grid axes
 
     BT  = BURN_TIME_LS(IIG,JJG)
     SHF = 0.0_EB !surface heat flux W/m^2
     WC%LSET_FIRE = .FALSE.
 
-!Determine surface heat flux for fire spread through grid cell. Account for fires with a depth that is smaller
-!than the grid cell (GRIDCELL_FRACTION). Also account for partial presence of fire base as fire spreads into 
-!and out of the grid cell (FB_TIME_FCTR).
-
-    HRRPUA_OUT(IIG,JJG) = 0.0 !kW/m^2 
+    HRRPUA_OUT(IIG,JJG) = 0.0 !kW/m^2
     IF (SF%VEG_LSET_CROWN_FIRE_HEAD_ROS_MODEL=='SR') MASSPUA_CANOPY_CONSUMED(IIG,JJG) = &
-                  CFB_SR_LS(IIG,JJG)*SF%VEG_LSET_CANOPY_BULK_DENSITY*(SF%VEG_LSET_CANOPY_HEIGHT-SF%VEG_LSET_CANOPY_BASE_HEIGHT) 
+                  CFB_SR_LS(IIG,JJG)*SF%VEG_LSET_CANOPY_BULK_DENSITY*(SF%VEG_LSET_CANOPY_HEIGHT-SF%VEG_LSET_CANOPY_BASE_HEIGHT)
     TOTAL_FUEL_LOAD = SF%VEG_LSET_SURF_LOAD + MASSPUA_CANOPY_CONSUMED(IIG,JJG)
 
+!Determine the surface heat flux from the passage of the fire front through the grid cell using a
+!progress-variable formulation with a per-cell energy budget:
+!
+!  XLEAD_LS  = position of the fire front (leading edge) across the cell, 0 to 1, advanced each
+!              step by DT_LS/GRIDCELL_TIME using the CURRENT local ROS. This integrates the actual
+!              speed history of the front, so a front that stalls in or at the cell stops the
+!              cell's burning progress (and its heat release) until spread resumes.
+!  XTRAIL_LS = position of the burnout line (trailing edge of the fire base). It begins to advance
+!              one fire residence time (VEG_LSET_FIREBASE_TIME) after the cell ignites and moves at
+!              the current ROS, never passing XLEAD_LS.
+!  fraction of the cell actively burning = XLEAD_LS - XTRAIL_LS. This single expression covers the
+!  full range of fire depth (ROS*FIREBASE_TIME) relative to cell size: for deep fires it ramps to 1
+!  and back (the former GRIDCELL_FRACTION>=1 branch); for shallow fires it saturates at the
+!  instantaneous depth/cell fraction (the former GRIDCELL_FRACTION<1 branch), with no switch
+!  between discrete branches.
+!  E_REL_LS  = energy per unit area released so far; E_AVAIL_LS = energy available at ignition.
+!
+!The budget cap below makes the time-integrated release exactly (1-CHAR_FRACTION)*LOAD*Hc per unit
+!area for every cell the front fully crosses, for ANY time history of the local ROS. The previous
+!formulation, which rescaled its entry/exit ramps by the instantaneous ROS, silently lost the
+!difference between the entry ramp (computed while the local ROS was still low, ahead of the fire's
+!own induced flow) and the exit ramp (computed at the higher post-passage ROS) - about 13% of the
+!total fuel energy in verification tests, on top of ~5% from ignitor cells that never burned.
+!Cells the front only partially crosses before stalling permanently release only the entered
+!fraction of their budget (partial fuel consumption), and resume burning if spread resumes.
+
     IF_FIRELINE_PASSAGE: IF (PHI_LS(IIG,JJG) >= -SF%VEG_LSET_PHIDEPTH .AND. .NOT. SF%VEG_LSET_BURNER .AND. &
-                             .NOT. VEG_LEVEL_SET_BURNERS_FOR_FIRELINE) THEN 
+                             .NOT. VEG_LEVEL_SET_BURNERS_FOR_FIRELINE) THEN
 
-      WC%LSET_FIRE = .TRUE.
-      SHF = (1.0_EB-SF%VEG_CHAR_FRACTION)*SF%VEG_LSET_HEAT_OF_COMBUSTION*TOTAL_FUEL_LOAD*RFIREBASE_TIME !max surface heat flux, W/m^2
-!if(iig==31 .and. jjg==49 .and. nm==5) print '(A,2x,5ES12.4)','time, charfrac,Hc,w,rfbt =', & 
-!            t_cfd,sf%veg_char_fraction,sf%veg_lset_heat_of_combustion,total_fuel_load,rfirebase_time
+!     Freeze the available fuel energy per unit area, J/m^2, at first arrival of the fire
+      IF (E_AVAIL_LS(IIG,JJG) < 0.0_EB) E_AVAIL_LS(IIG,JJG) = &
+          (1.0_EB-SF%VEG_CHAR_FRACTION)*SF%VEG_LSET_HEAT_OF_COMBUSTION*TOTAL_FUEL_LOAD
 
-!Grid cell > fire depth      
-      IF (GRIDCELL_FRACTION < 1.0_EB) THEN
-        SHF = SHF*GRIDCELL_FRACTION
-        FB_TIME_FCTR = 1.0_EB
-!       Fire entering cell
-        IF (0.0_EB        <= BT .AND. BT <= SF%VEG_LSET_FIREBASE_TIME) FB_TIME_FCTR = BT*RFIREBASE_TIME
-!       Fire exiting cell
-        IF (GRIDCELL_TIME <  BT .AND. BT <= GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) FB_TIME_FCTR = &
-          1.0_EB - (BT - GRIDCELL_TIME)*RFIREBASE_TIME
-!       Fire has left cell
-        IF (BT > GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) WC%LSET_FIRE = .FALSE.
-        WC%VEG_HEIGHT = SF%VEG_LSET_SURF_HEIGHT*(1._EB - BT/(SF%VEG_LSET_FIREBASE_TIME+GRIDCELL_TIME))
-!       WC%VEG_HEIGHT = 0.0_EB
+      IF_HAS_FUEL: IF (E_AVAIL_LS(IIG,JJG) > 0.0_EB) THEN
+
+        SHF = E_AVAIL_LS(IIG,JJG)*RFIREBASE_TIME !max surface heat flux, W/m^2
+
+!       Advance the leading edge with the front, and the burnout line one residence time behind it
+        XLEAD_LS(IIG,JJG) = MIN(1.0_EB, XLEAD_LS(IIG,JJG) + DT_LS*RGRIDCELL_TIME)
+        IF (BT > SF%VEG_LSET_FIREBASE_TIME) &
+          XTRAIL_LS(IIG,JJG) = MIN(XLEAD_LS(IIG,JJG), XTRAIL_LS(IIG,JJG) + DT_LS*RGRIDCELL_TIME)
+
+        FB_TIME_FCTR = XLEAD_LS(IIG,JJG) - XTRAIL_LS(IIG,JJG)
+
+!       Both edges have crossed the cell but the budget is not yet spent (the entry ramp, taken at
+!       the lower pre-arrival ROS, withheld more than the exit ramp repaid): release the remainder
+!       at the fire base rate rather than discarding it
+        IF (XTRAIL_LS(IIG,JJG) >= 1.0_EB) FB_TIME_FCTR = 1.0_EB
+
+        SHF = SHF*FB_TIME_FCTR
+
+!       Budget cap: only the fuel in the swath the front has actually entered can burn, and no
+!       cell may release more than its total available energy
+        SHF = MIN(SHF, (E_AVAIL_LS(IIG,JJG)*XLEAD_LS(IIG,JJG) - E_REL_LS(IIG,JJG))/DT_LS)
+        SHF = MAX(SHF, 0.0_EB)
+        E_REL_LS(IIG,JJG) = E_REL_LS(IIG,JJG) + SHF*DT_LS
+
+        WC%LSET_FIRE = SHF > 0.0_EB
+        WC%VEG_LSET_SURFACE_HEATFLUX = -SHF
+
+!       Remaining vegetation height follows fuel consumption
+        WC%VEG_HEIGHT = SF%VEG_LSET_SURF_HEIGHT*MAX(0.0_EB, 1.0_EB - E_REL_LS(IIG,JJG)/E_AVAIL_LS(IIG,JJG))
+
         BURN_TIME_LS(IIG,JJG) = BURN_TIME_LS(IIG,JJG) + DT_LS
 
-!if(iig==46 .and. jjg==49 .and. nm==5) then 
-!   print '(A,2x,7ES12.4)','----time dx>fd, ros, bt, gct, fbt, fctr, shf =',t_cfd,ros_mag,bt,gridcell_time,sf%veg_lset_firebase_time, &
-!                                                                          fb_time_fctr,-shf*0.001_EB
-!   print '(A,2x,1ES12.4,L2)','cell fract, lset_fire =',gridcell_fraction,wc%lset_fire
-!   print '(A,2x,4ES12.4,L2)','----time dtdx>dtfb, shf kW/m2, fb_time_fctr, cell fract, lset_fire =',t_cfd,-shf*0.001_EB,fb_time_fctr, &
-!                              gridcell_fraction,wc%lset_fire
-!   print '(A,2x,7ES12.4)','ros, hcomb, fuel load, fbt, cfb, probcruz, probin',ros_mag,sf%veg_lset_heat_of_combustion,total_fuel_load,  &
-!                              firebase_time,cfb_ls(iig,jjg),CRUZ_CROWN_PROB(IIG,JJG),sf%veg_lset_cruz_prob_crown
-!endif
-        WC%VEG_LSET_SURFACE_HEATFLUX = -SHF*FB_TIME_FCTR
-      ENDIF
-
-!Grid cell <= fire depth      
-      IF (GRIDCELL_FRACTION >= 1.0_EB) THEN
-        FB_TIME_FCTR = 1.0_EB
-!       Fire entering cell
-        IF (0.0_EB        <= BT .AND. BT <= GRIDCELL_TIME) FB_TIME_FCTR = BT*RGRIDCELL_TIME
-!       Fire exiting cell
-        IF (SF%VEG_LSET_FIREBASE_TIME <  BT .AND. BT <= GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) FB_TIME_FCTR = &
-          1.0_EB - (BT - SF%VEG_LSET_FIREBASE_TIME)*RGRIDCELL_TIME
-!       Fire has left cell
-        IF (BT > GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) WC%LSET_FIRE = .FALSE.
-        WC%VEG_HEIGHT = SF%VEG_LSET_SURF_HEIGHT*(1._EB - BT/(SF%VEG_LSET_FIREBASE_TIME+GRIDCELL_TIME))
-!       WC%VEG_HEIGHT = 0.0_EB
-        BURN_TIME_LS(IIG,JJG) = BURN_TIME_LS(IIG,JJG) + DT_LS
-
-!if(iig==46 .and. jjg==49 .and. nm==5) then 
-!   print '(A,2x,7ES12.4)','++++time dx<=fd, ros, bt, gct, fbt, fctr, shf =',t_cfd,ros_mag,bt,gridcell_time,sf%veg_lset_firebase_time, &
-!                                                                            fb_time_fctr,-shf*0.001_EB
-!   print '(A,2x,2ES12.4,L2)','cell fract, lset_fire,W =',gridcell_fraction,total_fuel_load,wc%lset_fire
-!   print '(A,2x,7ES12.4)','ros, hcomb, fuel load, fbt, cfb, probcruz, probin',ros_mag,sf%veg_lset_heat_of_combustion,total_fuel_load,  &
-!                              firebase_time,cfb_ls(iig,jjg),CRUZ_CROWN_PROB(IIG,JJG),sf%veg_lset_cruz_prob_crown
-!endif
-        WC%VEG_LSET_SURFACE_HEATFLUX = -SHF*FB_TIME_FCTR
-      ENDIF
-
-!     IF (WC%LSET_FIRE) HRRPUA_OUT(IIG,JJG) = -WC%VEG_LSET_SURFACE_HEATFLUX*0.001 !kW/m^2 for Smokeview output
+      ENDIF IF_HAS_FUEL
 
     ENDIF IF_FIRELINE_PASSAGE
 
-     
-! Stop burning if the fire front residence time is exceeded
+! Cell is not (or no longer) releasing energy: burned out, out of fuel, or the front is stalled
+! with the entered swath consumed. PHI and E_REL_LS/E_AVAIL_LS retain their state, so burning
+! resumes automatically if the front advances into the cell again.
     IF (PHI_LS(IIG,JJG) >= -SF%VEG_LSET_PHIDEPTH .AND. .NOT. WC%LSET_FIRE) THEN
         WC%VEG_LSET_SURFACE_HEATFLUX = 0.0_EB
-        WC%VEG_HEIGHT = 0.0_EB 
-        BURN_TIME_LS(IIG,JJG) = 999999999._EB
+        IF (E_AVAIL_LS(IIG,JJG) > 0.0_EB) THEN
+          IF (E_REL_LS(IIG,JJG) >= E_AVAIL_LS(IIG,JJG)*(1.0_EB-1.0E-9_EB)) WC%VEG_HEIGHT = 0.0_EB
+        ENDIF
     ENDIF
 
 !if(x(iig)==29 .and. y(jjg)==1) then 
@@ -4421,7 +4456,11 @@ DO WHILE (TIME_LS < T_FINAL)
 !RK Stage 1
  RK2_PREDICTOR_LS = .TRUE.
  CALL LEVEL_SET_ADVECT_FLUX(NM)
- PHI1_LS = PHI_LS - DT_LS*FLUX0_LS
+!Clamp to [PHI_MIN_LS,PHI_MAX_LS]. The TVD flux limiter suppresses new extrema but does not
+!strictly guarantee boundedness here: the spread rate field varies in space (compressive at the
+!front), the 2D advection is dimension-by-dimension, and the spread rates are recomputed between
+!the two RK stages. Small over/undershoots beyond +-1 are therefore possible and are removed.
+ PHI1_LS = MAX(PHI_MIN_LS, MIN(PHI_MAX_LS, PHI_LS - DT_LS*FLUX0_LS))
 
 !RK Stage2
  RK2_PREDICTOR_LS = .FALSE.
@@ -4436,7 +4475,8 @@ DO WHILE (TIME_LS < T_FINAL)
    CALL LEVEL_SET_SR_CROWNFIRE_OR_NOT(NM)
  ENDIF
  CALL LEVEL_SET_ADVECT_FLUX(NM)
- PHI_LS = PHI_LS - 0.5_EB*DT_LS*(FLUX0_LS + FLUX1_LS)
+!Clamp as in RK Stage 1
+ PHI_LS = MAX(PHI_MIN_LS, MIN(PHI_MAX_LS, PHI_LS - 0.5_EB*DT_LS*(FLUX0_LS + FLUX1_LS)))
 
 !The following is done here instead of in Stage 1 RK so updated ROS can be used in coupled LS when
 !determining if fire residence time is shorter than a time step.
@@ -4526,6 +4566,8 @@ ENDIF
 !MESHES(1)%LSET_PHI(IBP1,:,1) = MESHES(2)%LSET_PHI(   1,:,1)
 !MESHES(2)%LSET_PHI(   0,:,1) = MESHES(1)%LSET_PHI(IBAR,:,1)
 !if (nm == 2) print '(A,1x,10ES12.4)',meshes(2)%lset_phi(0,0:9,1)
+
+!print '(A,1x,3ES12.4)','TIME_LS,SUMTIME_LS,DT_LS',time_ls,sumtime_ls,DT_LS
 
 !Runtime output of slice files containing level set variables for smokeview animation
  IF (SUM_T_SLCF_LS >= DT_OUTPUT_LS) THEN    
@@ -4682,6 +4724,84 @@ ENDDO !While loop
 !CLOSE(9998)
 
 END SUBROUTINE LEVEL_SET_FIREFRONT_PROPAGATION
+
+
+!************************************************************************************************
+SUBROUTINE THERMAL_ELEMENT_HEAT_RELEASE(T_CFD,NM)
+!************************************************************************************************
+!
+! Account for the heat released by thermal elements when the level set model is NOT being used,
+! i.e. when the elements are emitted by a fixed HRRPUA burner (MISC THERMAL_ELEMENTS=.TRUE.).
+!
+! This is the level-set-free counterpart of the thermal element block near the end of
+! LEVEL_SET_FIREFRONT_PROPAGATION. The heat release accounting is identical; the two differ only
+! in where they get their time step from (here the CFD time step MESHES(NM)%DT, there the level
+! set time step DT_LS) and in the zeroing of Q for the no-REAC case handled below. The elements
+! themselves, and their heat content LP%LSET_HRRPUV, are created in WALL_PARTICLE_INSERT (part.f90).
+!
+! Called once per time step from main.f90, after COMBUSTION has filled Q and before
+! COMPUTE_RADIATION and DIVERGENCE_PART_1 consume it. This is the same point in the time step at
+! which the level set version deposits its heat.
+!
+USE TRAN, ONLY: GET_IJK
+INTEGER, INTENT(IN) :: NM
+REAL(EB), INTENT(IN) :: T_CFD
+INTEGER :: I,II,JJ,KK,IPC
+REAL(EB) :: DT_TE,TE_AGE,TE_HRRPUV,XI_TE,YJ_TE,ZK_TE
+
+IF (.NOT. THERMAL_ELEMENTS) RETURN
+
+CALL POINT_TO_MESH(NM)
+
+! Q is normally zeroed at the top of COMBUSTION_GENERAL (fire.f90), but COMBUSTION is only called
+! when there is at least one REAC. A thermal element burner needs no chemistry, so if the input
+! file has no REAC line we must zero Q here ourselves; otherwise the deposits below would
+! accumulate from time step to time step.
+! NOTE: with no REAC there is also no radiative loss from Q (radi.f90 applies RADIATIVE_FRACTION
+! only when N_REACTIONS>0), so all of the thermal element energy stays in the gas as sensible
+! heat. Include a REAC (and RADI RADIATIVE_FRACTION) if the level set thermal element behavior,
+! in which a fraction of the energy is radiated, is wanted.
+
+IF (N_REACTIONS == 0) Q = 0._EB
+
+DT_TE = MESHES(NM)%DT
+
+PARTICLE_LOOP: DO I=1,NLP
+
+   LP  => PARTICLE(I)
+   IPC =  LP%CLASS
+   PC  => PARTICLE_CLASS(IPC)
+   IF (.NOT. LP%LSET_THERMAL_ELEMENT) CYCLE PARTICLE_LOOP
+
+   CALL GET_IJK(LP%X,LP%Y,LP%Z,NM,XI_TE,YJ_TE,ZK_TE,II,JJ,KK)
+
+!  Skip an element that has drifted outside this mesh. It is removed, or handed to the neighboring
+!  mesh, by REMOVE_PARTICLES; guarding here keeps the deposit below inside the Q array.
+   IF (II < 1 .OR. II > IBAR .OR. JJ < 1 .OR. JJ > JBAR .OR. KK < 1 .OR. KK > KBAR) CYCLE PARTICLE_LOOP
+
+!  Constant heat release rate over the element's burn time (no decay), as in the level set version.
+   TE_AGE    = T_CFD - LP%T
+   TE_HRRPUV = LP%LSET_HRRPUV
+
+!  Element has finished burning
+   IF (TE_AGE > PC%TE_BURNTIME) TE_HRRPUV = 0.0_EB
+
+!  Element will burn out part way through the coming time step. Because REMOVE_PARTICLES (part.f90)
+!  deletes an element as soon as its age exceeds PC%LIFETIME (>= TE_BURNTIME), this is the last time
+!  step on which the element is still present, so the residual energy it would have released during
+!  the remainder of TE_BURNTIME is added to the full contribution here rather than being lost.
+!  Deposits occur at ages DT,2*DT,...,N*DT with N*DT <= TE_BURNTIME, so the energy delivered is
+!    HRRPUV*N*DT + HRRPUV*(TE_BURNTIME - N*DT) = HRRPUV*TE_BURNTIME,
+!  i.e. exactly the element's heat content, independent of the time step. This is the same
+!  expression used by the level set version in LEVEL_SET_FIREFRONT_PROPAGATION.
+   IF (TE_AGE + DT_TE > PC%TE_BURNTIME) TE_HRRPUV = TE_HRRPUV + TE_HRRPUV*(PC%TE_BURNTIME - TE_AGE)/DT_TE
+
+   Q(II,JJ,KK) = Q(II,JJ,KK) + TE_HRRPUV
+
+ENDDO PARTICLE_LOOP
+
+END SUBROUTINE THERMAL_ELEMENT_HEAT_RELEASE
+
 
 !************************************************************************************************
 SUBROUTINE END_LEVEL_SET
@@ -4877,7 +4997,7 @@ FLUX_ILOOP: DO I = 1,NX_LS
        
        IF (ABS(DZTDX(I,J)) > 0._EB) SR_X_LS_P(I,J) = SR_X_LS_P(I,J) * ABS(COS(ATAN(DZTDX(I,J))))
        IF (ABS(DZTDY(I,J)) > 0._EB) SR_Y_LS_P(I,J) = SR_Y_LS_P(I,J) * ABS(COS(ATAN(DZTDY(I,J))))
-       
+
        MAG_SR = SQRT(SR_X_LS_P(I,J)**2 + SR_Y_LS_P(I,J)**2)   
    
    ELSE !McArthur Spread Model

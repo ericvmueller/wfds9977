@@ -12584,7 +12584,7 @@ CONTAINS
       !
       ! Local variables
       REAL(EB) RN, x1, x2, y1, y2, z1, z2, d_max, dist, xx, yy, zz, xx1, yy1
-      INTEGER  II, JJ, KK, ior, irnmax, irn, ie, NR, IM
+      INTEGER  II, JJ, KK, ior, irnmax, irn, ie, NR
       REAL(EB), DIMENSION(6) ::y_tmp, x_tmp, r_tmp
 
       TYPE (EVAC_ENTR_TYPE), POINTER :: PNX =>NULL()
@@ -12765,12 +12765,13 @@ CONTAINS
          END SELECT
          HR%FFIELD_NAME = TRIM(PNX%GRID_NAME)
          HR%I_FFIELD    = 0
-         Mesh2Loop: DO IM = 1, NMESHES
-            IF ( EVACUATION_ONLY(IM) .AND. TRIM(HR%FFIELD_NAME) == TRIM(MESH_NAME(IM)) ) THEN
-               HR%I_FFIELD = IM
-               EXIT Mesh2Loop
-            END IF
-         END DO Mesh2Loop
+!The following is commented out to avoid gnu compilation error
+!rm      Mesh2Loop: DO i = 1, NMESHES
+!rm         IF ( EVACUATION_ONLY(I) .AND. TRIM(HR%FFIELD_NAME) == TRIM(MESH_NAME(i)) ) THEN
+!rm            HR%I_FFIELD = i
+!rm            EXIT Mesh2Loop
+!rm         END IF
+!rm      END DO Mesh2Loop
          IF ( HR%I_FFIELD == 0 ) THEN
             WRITE(MESSAGE,'(A,A,A,A)') 'ERROR: ENTR line ',TRIM(PNX%ID), ' problem with flow field name, ', &
                  TRIM(PNX%GRID_NAME),' not found'

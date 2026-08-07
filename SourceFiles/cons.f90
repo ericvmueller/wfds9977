@@ -244,7 +244,7 @@ REAL(EB), ALLOCATABLE, DIMENSION(:) :: CROWN_W,CROWN_B_H,TREE_H,X_TREE,Y_TREE,Z_
 !frustum bulk veg volumes
 REAL(EB), ALLOCATABLE, DIMENSION(:) :: CROWN_W_BOTTOM,CROWN_W_TOP 
 !rectangular bulk veg volumes
-REAL(EB), ALLOCATABLE, DIMENSION(:) :: XS_RECT_VEG,XF_RECT_VEG,YS_RECT_VEG,YF_RECT_VEG,ZS_RECT_VEG,ZF_RECT_VEG
+REAL(EB), ALLOCATABLE, DIMENSION(:) :: XS_RECT_VEG,XF_RECT_VEG,YS_RECT_VEG,YF_RECT_VEG,ZS_RECT_VEG,ZF_RECT_VEG,VOLFRAC_RECT_VEG
 !ring bulk veg volume
 REAL(EB), ALLOCATABLE, DIMENSION(:) :: RING_THICKNESS_VEG
 !All bulk veg volume types
@@ -291,7 +291,15 @@ LOGICAL  :: LSET_IGNITION=.FALSE.,VEG_LEVEL_SET,VEG_LEVEL_SET_BURNERS_FOR_FIRELI
             VEG_LEVEL_SET_THERMAL_ELEMENTS,VEG_LEVEL_SET_SURFACE_HEATFLUX,VEG_LEVEL_SET_SURFACE_HRRPUA, &
             VEG_LEVEL_SET_FM10_SPREADRATE=.FALSE.,VEG_LEVEL_SET_SR_CROWNFIRE_MODEL=.FALSE.,VEG_LEVEL_SET_CFIS_CROWNFIRE_MODEL=.FALSE.
 LOGICAL  :: RK2_PREDICTOR_LS,LSET_ELLIPSE,LSET_TAN2
-REAL     :: DT_LS_UNCOUPLED,PHI_MIN_LS,PHI_MAX_LS
+
+! Thermal elements driven directly by a SURF HRRPUA burner (i.e., WITHOUT the level set model).
+! Set on MISC as THERMAL_ELEMENTS=.TRUE. This is the level-set-free counterpart of
+! VEG_LEVEL_SET_THERMAL_ELEMENTS: instead of taking the thermal element heat content from the
+! level set surface heat flux (WC%VEG_LSET_SURFACE_HEATFLUX), it is taken from SF%HRRPUA on the
+! SURF line that defines the burner. The two flags are mutually exclusive (checked in read.f90).
+LOGICAL  :: THERMAL_ELEMENTS=.FALSE.
+REAL     :: DT_LS_UNCOUPLED,VEG_LEVEL_SET_LS_COMPUTE_TIME=-1._EB,VEG_LEVEL_SET_CFD_COMPUTE_TIME
+REAL(EB) :: PHI_MIN_LS,PHI_MAX_LS !level set scalar bounds; REAL(EB) so the RK-stage clamps in vege.f90 are kind-consistent with PHI_LS
 INTEGER  :: N_BRNR=0 !for 'burner' driven LS4 simulations
 INTEGER  :: LEVEL_SET_MODE=4
 
