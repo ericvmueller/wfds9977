@@ -3008,15 +3008,12 @@ LSET_INIT_WALL_CELL_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
   JJG = WC%JJG
   KKG = WC%KKG
 
-! Ignite landscape at user specified location if ignition is at time zero. The cell is lit across
-! its full width (XLEAD_LS=1) with the residence clock at zero so a fuel-carrying ignitor SURF
-! burns its fuel load (see LEVEL_SET_FIREFRONT_PROPAGATION); formerly BURN_TIME_LS=99999 marked
-! these cells as already burned out and their fuel was discarded.
+! Ignite landscape at user specified location if ignition is at time zero
+! DIAGNOSTIC ROLLBACK: restore master ignitor marking (BURN_TIME_LS=99999 skips fuel HRR)
   IF (SF%VEG_LSET_IGNITE_TIME == 0.0_EB .AND. T_BEGIN >= 0._EB) THEN
 !print '(A,ES12.4,1x,3I)','veg1:LS lset_ignite_time,iig,jjg ',sf%veg_lset_ignite_time,iig,jjg
     PHI_LS(IIG,JJG) = PHI_MAX_LS
-    BURN_TIME_LS(IIG,JJG) = 0.0_EB
-    XLEAD_LS(IIG,JJG) = 1.0_EB
+    BURN_TIME_LS(IIG,JJG) = 99999.0_EB
 !   IF (SF%HRRPUA > 0.0_EB) THEN !mimic burner
 !     WC%VEG_LSET_SURFACE_HEATFLUX = -SF%HRRPUA
 !     IF (VEG_LEVEL_SET_SURFACE_HEATFLUX) WC%QCONF = WC%VEG_LSET_SURFACE_HEATFLUX
@@ -4073,26 +4070,16 @@ DO WHILE (TIME_LS < T_FINAL)
   IOR = WC%IOR
   
 !-Ignite landscape at user specified location(s) and time(s) to originate Level Set fire front propagation
-! Ignitor cells are lit across their full width at once: XLEAD_LS=1 with the residence clock at
-! zero, so that a fuel-carrying ignitor SURF releases its fuel energy over VEG_LSET_FIREBASE_TIME
-! (the per-cell energy budget then ends the burn). Previously these cells were marked with
-! BURN_TIME_LS=99999, which the heat flux logic read as "already burned out" - an ignitor cell's
-! fuel load was silently discarded.
+! DIAGNOSTIC ROLLBACK: restore master ignitor marking (BURN_TIME_LS=99999 skips fuel HRR)
   IF (SF%VEG_LSET_IGNITE_TIME > 0.0_EB .AND. SF%VEG_LSET_IGNITE_TIME < DT_LS .AND. T_CFD >= 0._EB) THEN
 !print '(A,ES12.4,1x,3I)','veg2:LS lset_ignite_time,iig,jjg ',sf%veg_lset_ignite_time,iig,jjg
-    IF (PHI_LS(IIG,JJG) < PHI_MAX_LS) THEN !first time only; burn state is already set otherwise
-      PHI_LS(IIG,JJG) = PHI_MAX_LS
-      BURN_TIME_LS(IIG,JJG) = 0.0_EB
-      XLEAD_LS(IIG,JJG) = 1.0_EB
-    ENDIF
+    PHI_LS(IIG,JJG) = PHI_MAX_LS
+    BURN_TIME_LS(IIG,JJG) = 99999.0_EB
   ENDIF
   IF (SF%VEG_LSET_IGNITE_TIME >= TIME_LS .AND. SF%VEG_LSET_IGNITE_TIME <= TIME_LS + DT_LS .AND. T_CFD >= 0._EB) THEN
 !print '(A,ES12.4,1x,3I)','veg3:LS lset_ignite_time,iig,jjg ',sf%veg_lset_ignite_time,iig,jjg
-    IF (PHI_LS(IIG,JJG) < PHI_MAX_LS) THEN
-      PHI_LS(IIG,JJG) = PHI_MAX_LS
-      BURN_TIME_LS(IIG,JJG) = 0.0_EB
-      XLEAD_LS(IIG,JJG) = 1.0_EB
-    ENDIF
+    PHI_LS(IIG,JJG) = PHI_MAX_LS
+    BURN_TIME_LS(IIG,JJG) = 99999.0_EB
   ENDIF
 
   IF (.NOT. SF%VEG_LSET_SPREAD) CYCLE WALL_CELL_LOOP1
@@ -4197,101 +4184,74 @@ DO WHILE (TIME_LS < T_FINAL)
     ENDIF IF_ELLIPSE
 
 !--- Compute heat flux into atmosphere
+! DIAGNOSTIC ROLLBACK: restore master GRIDCELL_FRACTION / BURN_TIME HRR formulation
     GRIDCELL_TIME  = 0.0_EB
-    RGRIDCELL_TIME = 0.0_EB !zero for a cell whose local ROS is (currently) zero: front stalled, edges do not advance
     RFIREBASE_TIME = 1.0_EB/SF%VEG_LSET_FIREBASE_TIME
     ROS_MAG = SQRT(SR_X_LS(IIG,JJG)**2 + SR_Y_LS(IIG,JJG)**2)
     IF(ROS_MAG > 0.0_EB) THEN
       GRIDCELL_TIME = SQRT(DX(IIG)**2 + DY(JJG)**2)/ROS_MAG
       RGRIDCELL_TIME = 1.0_EB/GRIDCELL_TIME
+      GRIDCELL_FRACTION = MIN(1.0_EB,SF%VEG_LSET_FIREBASE_TIME*RGRIDCELL_TIME) !assumes spread direction parallel to grid axes
     ENDIF
+    BURNTIME = MAX(SF%VEG_LSET_FIREBASE_TIME,GRIDCELL_TIME) !assumes spread direction parallel to grid axes
 
     BT  = BURN_TIME_LS(IIG,JJG)
     SHF = 0.0_EB !surface heat flux W/m^2
     WC%LSET_FIRE = .FALSE.
+
+!Determine surface heat flux for fire spread through grid cell. Account for fires with a depth that is smaller
+!than the grid cell (GRIDCELL_FRACTION). Also account for partial presence of fire base as fire spreads into
+!and out of the grid cell (FB_TIME_FCTR).
 
     HRRPUA_OUT(IIG,JJG) = 0.0 !kW/m^2
     IF (SF%VEG_LSET_CROWN_FIRE_HEAD_ROS_MODEL=='SR') MASSPUA_CANOPY_CONSUMED(IIG,JJG) = &
                   CFB_SR_LS(IIG,JJG)*SF%VEG_LSET_CANOPY_BULK_DENSITY*(SF%VEG_LSET_CANOPY_HEIGHT-SF%VEG_LSET_CANOPY_BASE_HEIGHT)
     TOTAL_FUEL_LOAD = SF%VEG_LSET_SURF_LOAD + MASSPUA_CANOPY_CONSUMED(IIG,JJG)
 
-!Determine the surface heat flux from the passage of the fire front through the grid cell using a
-!progress-variable formulation with a per-cell energy budget:
-!
-!  XLEAD_LS  = position of the fire front (leading edge) across the cell, 0 to 1, advanced each
-!              step by DT_LS/GRIDCELL_TIME using the CURRENT local ROS. This integrates the actual
-!              speed history of the front, so a front that stalls in or at the cell stops the
-!              cell's burning progress (and its heat release) until spread resumes.
-!  XTRAIL_LS = position of the burnout line (trailing edge of the fire base). It begins to advance
-!              one fire residence time (VEG_LSET_FIREBASE_TIME) after the cell ignites and moves at
-!              the current ROS, never passing XLEAD_LS.
-!  fraction of the cell actively burning = XLEAD_LS - XTRAIL_LS. This single expression covers the
-!  full range of fire depth (ROS*FIREBASE_TIME) relative to cell size: for deep fires it ramps to 1
-!  and back (the former GRIDCELL_FRACTION>=1 branch); for shallow fires it saturates at the
-!  instantaneous depth/cell fraction (the former GRIDCELL_FRACTION<1 branch), with no switch
-!  between discrete branches.
-!  E_REL_LS  = energy per unit area released so far; E_AVAIL_LS = energy available at ignition.
-!
-!The budget cap below makes the time-integrated release exactly (1-CHAR_FRACTION)*LOAD*Hc per unit
-!area for every cell the front fully crosses, for ANY time history of the local ROS. The previous
-!formulation, which rescaled its entry/exit ramps by the instantaneous ROS, silently lost the
-!difference between the entry ramp (computed while the local ROS was still low, ahead of the fire's
-!own induced flow) and the exit ramp (computed at the higher post-passage ROS) - about 13% of the
-!total fuel energy in verification tests, on top of ~5% from ignitor cells that never burned.
-!Cells the front only partially crosses before stalling permanently release only the entered
-!fraction of their budget (partial fuel consumption), and resume burning if spread resumes.
-
     IF_FIRELINE_PASSAGE: IF (PHI_LS(IIG,JJG) >= -SF%VEG_LSET_PHIDEPTH .AND. .NOT. SF%VEG_LSET_BURNER .AND. &
                              .NOT. VEG_LEVEL_SET_BURNERS_FOR_FIRELINE) THEN
 
-!     Freeze the available fuel energy per unit area, J/m^2, at first arrival of the fire
-      IF (E_AVAIL_LS(IIG,JJG) < 0.0_EB) E_AVAIL_LS(IIG,JJG) = &
-          (1.0_EB-SF%VEG_CHAR_FRACTION)*SF%VEG_LSET_HEAT_OF_COMBUSTION*TOTAL_FUEL_LOAD
+      WC%LSET_FIRE = .TRUE.
+      SHF = (1.0_EB-SF%VEG_CHAR_FRACTION)*SF%VEG_LSET_HEAT_OF_COMBUSTION*TOTAL_FUEL_LOAD*RFIREBASE_TIME !max surface heat flux, W/m^2
 
-      IF_HAS_FUEL: IF (E_AVAIL_LS(IIG,JJG) > 0.0_EB) THEN
-
-        SHF = E_AVAIL_LS(IIG,JJG)*RFIREBASE_TIME !max surface heat flux, W/m^2
-
-!       Advance the leading edge with the front, and the burnout line one residence time behind it
-        XLEAD_LS(IIG,JJG) = MIN(1.0_EB, XLEAD_LS(IIG,JJG) + DT_LS*RGRIDCELL_TIME)
-        IF (BT > SF%VEG_LSET_FIREBASE_TIME) &
-          XTRAIL_LS(IIG,JJG) = MIN(XLEAD_LS(IIG,JJG), XTRAIL_LS(IIG,JJG) + DT_LS*RGRIDCELL_TIME)
-
-        FB_TIME_FCTR = XLEAD_LS(IIG,JJG) - XTRAIL_LS(IIG,JJG)
-
-!       Both edges have crossed the cell but the budget is not yet spent (the entry ramp, taken at
-!       the lower pre-arrival ROS, withheld more than the exit ramp repaid): release the remainder
-!       at the fire base rate rather than discarding it
-        IF (XTRAIL_LS(IIG,JJG) >= 1.0_EB) FB_TIME_FCTR = 1.0_EB
-
-        SHF = SHF*FB_TIME_FCTR
-
-!       Budget cap: only the fuel in the swath the front has actually entered can burn, and no
-!       cell may release more than its total available energy
-        SHF = MIN(SHF, (E_AVAIL_LS(IIG,JJG)*XLEAD_LS(IIG,JJG) - E_REL_LS(IIG,JJG))/DT_LS)
-        SHF = MAX(SHF, 0.0_EB)
-        E_REL_LS(IIG,JJG) = E_REL_LS(IIG,JJG) + SHF*DT_LS
-
-        WC%LSET_FIRE = SHF > 0.0_EB
-        WC%VEG_LSET_SURFACE_HEATFLUX = -SHF
-
-!       Remaining vegetation height follows fuel consumption
-        WC%VEG_HEIGHT = SF%VEG_LSET_SURF_HEIGHT*MAX(0.0_EB, 1.0_EB - E_REL_LS(IIG,JJG)/E_AVAIL_LS(IIG,JJG))
-
+!Grid cell > fire depth
+      IF (GRIDCELL_FRACTION < 1.0_EB) THEN
+        SHF = SHF*GRIDCELL_FRACTION
+        FB_TIME_FCTR = 1.0_EB
+!       Fire entering cell
+        IF (0.0_EB        <= BT .AND. BT <= SF%VEG_LSET_FIREBASE_TIME) FB_TIME_FCTR = BT*RFIREBASE_TIME
+!       Fire exiting cell
+        IF (GRIDCELL_TIME <  BT .AND. BT <= GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) FB_TIME_FCTR = &
+          1.0_EB - (BT - GRIDCELL_TIME)*RFIREBASE_TIME
+!       Fire has left cell
+        IF (BT > GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) WC%LSET_FIRE = .FALSE.
+        WC%VEG_HEIGHT = SF%VEG_LSET_SURF_HEIGHT*(1._EB - BT/(SF%VEG_LSET_FIREBASE_TIME+GRIDCELL_TIME))
         BURN_TIME_LS(IIG,JJG) = BURN_TIME_LS(IIG,JJG) + DT_LS
+        WC%VEG_LSET_SURFACE_HEATFLUX = -SHF*FB_TIME_FCTR
+      ENDIF
 
-      ENDIF IF_HAS_FUEL
+!Grid cell <= fire depth
+      IF (GRIDCELL_FRACTION >= 1.0_EB) THEN
+        FB_TIME_FCTR = 1.0_EB
+!       Fire entering cell
+        IF (0.0_EB        <= BT .AND. BT <= GRIDCELL_TIME) FB_TIME_FCTR = BT*RGRIDCELL_TIME
+!       Fire exiting cell
+        IF (SF%VEG_LSET_FIREBASE_TIME <  BT .AND. BT <= GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) FB_TIME_FCTR = &
+          1.0_EB - (BT - SF%VEG_LSET_FIREBASE_TIME)*RGRIDCELL_TIME
+!       Fire has left cell
+        IF (BT > GRIDCELL_TIME + SF%VEG_LSET_FIREBASE_TIME) WC%LSET_FIRE = .FALSE.
+        WC%VEG_HEIGHT = SF%VEG_LSET_SURF_HEIGHT*(1._EB - BT/(SF%VEG_LSET_FIREBASE_TIME+GRIDCELL_TIME))
+        BURN_TIME_LS(IIG,JJG) = BURN_TIME_LS(IIG,JJG) + DT_LS
+        WC%VEG_LSET_SURFACE_HEATFLUX = -SHF*FB_TIME_FCTR
+      ENDIF
 
     ENDIF IF_FIRELINE_PASSAGE
 
-! Cell is not (or no longer) releasing energy: burned out, out of fuel, or the front is stalled
-! with the entered swath consumed. PHI and E_REL_LS/E_AVAIL_LS retain their state, so burning
-! resumes automatically if the front advances into the cell again.
+! Stop burning if the fire front residence time is exceeded
     IF (PHI_LS(IIG,JJG) >= -SF%VEG_LSET_PHIDEPTH .AND. .NOT. WC%LSET_FIRE) THEN
         WC%VEG_LSET_SURFACE_HEATFLUX = 0.0_EB
-        IF (E_AVAIL_LS(IIG,JJG) > 0.0_EB) THEN
-          IF (E_REL_LS(IIG,JJG) >= E_AVAIL_LS(IIG,JJG)*(1.0_EB-1.0E-9_EB)) WC%VEG_HEIGHT = 0.0_EB
-        ENDIF
+        WC%VEG_HEIGHT = 0.0_EB
+        BURN_TIME_LS(IIG,JJG) = 999999999._EB
     ENDIF
 
 !if(x(iig)==29 .and. y(jjg)==1) then 
