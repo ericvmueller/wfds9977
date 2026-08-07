@@ -871,23 +871,10 @@ MAIN_LOOP: DO
 !      IF (USE_MPI) CALL EXCHANGE_HVAC_SOLUTION
    ENDIF
 
-   DO NM=1,NMESHES
-     IF (PROCESS(NM)/=MYID .OR. .NOT.ACTIVE_MESH(NM)) CYCLE
-     IF (VEG_LSET_CFD_COMPUTE_TIME_CNTR(NM) >= VEG_LEVEL_SET_CFD_COMPUTE_TIME) THEN  
-        CALL LEVEL_SET_BC(NM)
-        CALL LEVEL_SET_FIREFRONT_PROPAGATION(T(NM),NM)
-        VEG_LSET_CFD_COMPUTE_TIME_CNTR(NM) = 0.0_EB
-     ELSE
-        CALL LEVEL_SET_BC(NM)
-        VEG_LSET_CFD_COMPUTE_TIME_CNTR(NM) = VEG_LSET_CFD_COMPUTE_TIME_CNTR(NM) + MESHES(NM)%DT
-     ENDIF
-   ENDDO
-
-   ! Add the heat released by thermal elements emitted by a fixed HRRPUA burner (MISC
-   ! THERMAL_ELEMENTS=.TRUE.). When the level set model is used instead, the equivalent step is
-   ! done inside LEVEL_SET_FIREFRONT_PROPAGATION above; the two are mutually exclusive. This must
-   ! come after COMBUSTION (which zeroes and refills Q) and before COMPUTE_RADIATION and
-   ! DIVERGENCE_PART_1 below, which is where the level set version also sits.
+   ! DIAGNOSTIC: restore master LS call site (after WALL_BC / BNDRY_VEG).
+   ! Latest moved LEVEL_SET_* earlier and gated it with VEG_LEVEL_SET_CFD_COMPUTE_TIME;
+   ! that early loop is disabled here. Latest fireline HRR energy budget is unchanged.
+   ! Non-LS thermal-element burners still deposit heat before radiation.
 
    IF (THERMAL_ELEMENTS) THEN
       DO NM=1,NMESHES
@@ -900,8 +887,8 @@ MAIN_LOOP: DO
       IF (PROCESS(NM)/=MYID .OR. .NOT.ACTIVE_MESH(NM)) CYCLE COMPUTE_WALL_BC_2A
       CALL WALL_BC(T(NM),NM)
       CALL BNDRY_VEG_MASS_ENERGY_TRANSFER(T(NM),NM)
-!     CALL LEVEL_SET_BC(NM)
-!     CALL LEVEL_SET_FIREFRONT_PROPAGATION(T(NM),NM)
+      CALL LEVEL_SET_BC(NM)
+      CALL LEVEL_SET_FIREFRONT_PROPAGATION(T(NM),NM)
       CALL COMPUTE_RADIATION(T(NM),NM)
       CALL DIVERGENCE_PART_1(T(NM),NM)
    ENDDO COMPUTE_WALL_BC_2A
