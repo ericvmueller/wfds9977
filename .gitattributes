@@ -1,0 +1,13 @@
+# Normalize text files to LF in the repo
+* text=auto eol=lf
+
+# Explicitly binary
+*.pdf binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.o binary
+*.mod binary
+*.a binary
+*.exe binary
